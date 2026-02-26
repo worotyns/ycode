@@ -364,26 +364,41 @@ async function getIdsMatchingFilter(
 async function getFilteredItemIds(
   collectionId: string,
   isPublished: boolean,
-  filters: FilterCondition[],
+  filterGroups: FilterCondition[][],
 ): Promise<{ matchingIds: string[]; total: number }> {
   const client = await getSupabaseAdmin();
   if (!client) throw new Error('Supabase client not configured');
 
   const allItemIds = await getAllItemIdsForCollection(client, collectionId, isPublished);
 
-  if (filters.length === 0) {
+  if (filterGroups.length === 0) {
     return { matchingIds: allItemIds, total: allItemIds.length };
   }
 
-  let currentIds = new Set(allItemIds);
+  // Each group's conditions are ANDed. Groups are ORed (union).
+  const groupResults: Set<string>[] = [];
 
-  for (const filter of filters) {
-    if (currentIds.size === 0) break;
-    const matchingForFilter = await getIdsMatchingFilter(client, filter, isPublished, [...currentIds]);
-    currentIds = new Set([...currentIds].filter(id => matchingForFilter.has(id)));
+  for (const group of filterGroups) {
+    let currentIds = new Set(allItemIds);
+
+    for (const filter of group) {
+      if (currentIds.size === 0) break;
+      const matchingForFilter = await getIdsMatchingFilter(client, filter, isPublished, [...currentIds]);
+      currentIds = new Set([...currentIds].filter(id => matchingForFilter.has(id)));
+    }
+
+    groupResults.push(currentIds);
   }
 
-  return { matchingIds: [...currentIds], total: currentIds.size };
+  // Union all group results (OR)
+  const unionIds = new Set<string>();
+  for (const groupIds of groupResults) {
+    for (const id of groupIds) {
+      unionIds.add(id);
+    }
+  }
+
+  return { matchingIds: [...unionIds], total: unionIds.size };
 }
 
 /**
@@ -392,7 +407,8 @@ async function getFilteredItemIds(
  * Body (JSON):
  * - layerTemplate: Layer[]
  * - collectionLayerId: string
- * - filters: Array<{ fieldId, operator, value, value2? }>
+ * - filterGroups: Array<Array<{ fieldId, operator, value, value2? }>>
+ *     Groups are ORed; conditions within a group are ANDed.
  * - sortBy?: string
  * - sortOrder?: 'asc' | 'desc'
  * - limit?: number
@@ -409,7 +425,7 @@ export async function POST(
     const {
       layerTemplate,
       collectionLayerId,
-      filters = [],
+      filterGroups = [],
       sortBy,
       sortOrder = 'asc',
       limit,
@@ -427,7 +443,7 @@ export async function POST(
     const { matchingIds, total: filteredTotal } = await getFilteredItemIds(
       collectionId,
       true,
-      filters,
+      filterGroups,
     );
 
     if (matchingIds.length === 0) {

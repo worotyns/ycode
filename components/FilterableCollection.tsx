@@ -61,7 +61,10 @@ export default function FilterableCollection({
   const filterValues = useFilterStore((state) => state.values);
 
   const buildApiFilters = useCallback(() => {
-    const apiFilters: Array<{ fieldId: string; operator: string; value: string }> = [];
+    // Each active condition becomes its own group so the API ORs them.
+    // In a filter form, each input acts independently: checking "Free"
+    // and "Paid" means "show free OR paid", not "free AND paid".
+    const groups: Array<Array<{ fieldId: string; operator: string; value: string }>> = [];
 
     for (const group of filters.groups) {
       for (const condition of group.conditions) {
@@ -76,16 +79,16 @@ export default function FilterableCollection({
         }
 
         if (inputValue) {
-          apiFilters.push({
+          groups.push([{
             fieldId: condition.fieldId,
             operator: condition.operator,
             value: inputValue,
-          });
+          }]);
         }
       }
     }
 
-    return apiFilters;
+    return groups;
   }, [filters, filterValues]);
 
   const updateEmptyStateElements = useCallback((filteredCount: number) => {
@@ -243,12 +246,12 @@ export default function FilterableCollection({
 
   const goToFilteredPage = useCallback((page: number) => {
     if (page < 1 || page > filteredTotalPages || isFiltering) return;
-    const apiFilters = buildApiFilters();
-    if (apiFilters.length === 0) return;
+    const groups = buildApiFilters();
+    if (groups.length === 0) return;
     const offset = (page - 1) * (limit || 10);
     setFilteredPage(page);
     syncFilteredPageToUrl(page);
-    fetchFilteredRef.current(apiFilters, offset, false);
+    fetchFilteredRef.current(groups, offset, false);
   }, [filteredTotalPages, isFiltering, buildApiFilters, limit, syncFilteredPageToUrl]);
 
   useEffect(() => {
@@ -257,9 +260,9 @@ export default function FilterableCollection({
 
   const handleLoadMore = useCallback(() => {
     if (isFiltering || !filteredHasMore) return;
-    const apiFilters = buildApiFilters();
-    if (apiFilters.length === 0) return;
-    fetchFilteredRef.current(apiFilters, loadMoreOffsetRef.current, true);
+    const groups = buildApiFilters();
+    if (groups.length === 0) return;
+    fetchFilteredRef.current(groups, loadMoreOffsetRef.current, true);
   }, [isFiltering, filteredHasMore, buildApiFilters]);
 
   useEffect(() => {
@@ -307,11 +310,11 @@ export default function FilterableCollection({
   // --- Fetch logic ---
 
   const fetchFiltered = useCallback((
-    apiFilters: Array<{ fieldId: string; operator: string; value: string }>,
+    filterGroups: Array<Array<{ fieldId: string; operator: string; value: string }>>,
     offset: number,
     append: boolean,
   ) => {
-    if (apiFilters.length === 0) return;
+    if (filterGroups.length === 0) return;
 
     setIsFiltering(true);
 
@@ -325,7 +328,7 @@ export default function FilterableCollection({
       body: JSON.stringify({
         layerTemplate,
         collectionLayerId,
-        filters: apiFilters,
+        filterGroups,
         sortBy,
         sortOrder,
         limit,
@@ -390,14 +393,14 @@ export default function FilterableCollection({
   // --- React to filter value changes ---
 
   useEffect(() => {
-    const apiFilters = buildApiFilters();
-    const filterKey = JSON.stringify(apiFilters);
+    const filterGroups = buildApiFilters();
+    const filterKey = JSON.stringify(filterGroups);
 
     if (filterKey === prevFilterKeyRef.current) return;
     const wasEmpty = prevFilterKeyRef.current === '' || prevFilterKeyRef.current === '[]';
     prevFilterKeyRef.current = filterKey;
 
-    if (apiFilters.length === 0) {
+    if (filterGroups.length === 0) {
       // Remove filtered page param from URL
       const cleanUrl = new URL(window.location.href);
       if (cleanUrl.searchParams.has(fpKey)) {
@@ -467,7 +470,7 @@ export default function FilterableCollection({
     }
 
     const startOffset = (startPage - 1) * (limit || 10);
-    fetchFiltered(apiFilters, startOffset, false);
+    fetchFiltered(filterGroups, startOffset, false);
 
     return () => abortRef.current?.abort();
   }, [filterValues, buildApiFilters, fetchFiltered, paginationMode, attachPaginationIntercept, detachPaginationIntercept, restoreSsrPagination, getSsrPaginationWrapper, updateEmptyStateElements, fpKey, pKey, limit]);
