@@ -87,8 +87,9 @@ export default function FilterableCollection({
       for (const condition of group.conditions) {
         if (!condition.fieldId) continue;
 
-        let value = condition.value || '';
-        let value2 = condition.value2;
+        // Use static values only when bound is not linked to an input.
+        let value = condition.inputLayerId ? '' : (condition.value || '');
+        let value2 = condition.inputLayerId2 ? '' : condition.value2;
 
         if (condition.inputLayerId) {
           let inputValue = '';

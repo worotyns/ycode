@@ -54,6 +54,7 @@ import { generateId } from '@/lib/utils';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
 import { collectionsApi } from '@/lib/api';
 import { findDisplayField, getItemDisplayName } from '@/lib/collection-field-utils';
+import { toast } from 'sonner';
 
 import type { Layer, CollectionItemWithValues } from '@/types';
 
@@ -306,6 +307,7 @@ export default function SelectOptionsSettings({
   layer,
   onLayerUpdate,
 }: SelectOptionsSettingsProps) {
+  const SOURCE_ITEMS_PAGE_SIZE = 200;
   const [isOpen, setIsOpen] = useState(true);
   const [showAddPopover, setShowAddPopover] = useState(false);
   const [newLabel, setNewLabel] = useState('');
@@ -382,21 +384,84 @@ export default function SelectOptionsSettings({
     patchOptionsSource({ sortOrder: value as 'asc' | 'desc' });
   }, [patchOptionsSource]);
 
-  // Fetch collection items for the Default picker
+  // Fetch collection items for the Default picker (paged)
   const [sourceItems, setSourceItems] = useState<CollectionItemWithValues[]>([]);
+  const [sourceItemsOffset, setSourceItemsOffset] = useState(0);
+  const [sourceItemsHasMore, setSourceItemsHasMore] = useState(false);
+  const [sourceItemsLoading, setSourceItemsLoading] = useState(false);
+  const [sourceItemsLoadingMore, setSourceItemsLoadingMore] = useState(false);
+
+  const fetchSourceItems = useCallback(async (params: { reset: boolean; offset: number }) => {
+    if (!isCollectionSource || !optionsSource?.collectionId) return;
+
+    const { reset, offset } = params;
+    const requestOffset = reset ? 0 : offset;
+
+    if (reset) {
+      setSourceItemsLoading(true);
+    } else {
+      setSourceItemsLoadingMore(true);
+    }
+
+    try {
+      const res = await collectionsApi.getItems(optionsSource.collectionId, {
+        limit: SOURCE_ITEMS_PAGE_SIZE,
+        offset: requestOffset,
+      });
+      if (res.error) throw new Error(res.error);
+
+      const batch = res.data?.items || [];
+      const total = res.data?.total || 0;
+      setSourceItems((prev) => {
+        const merged = reset
+          ? batch
+          : [...prev, ...batch.filter(item => !prev.some(existing => existing.id === item.id))];
+        setSourceItemsHasMore(merged.length < total);
+        return merged;
+      });
+      setSourceItemsOffset(requestOffset + batch.length);
+    } catch (error) {
+      console.error('Failed to load source collection items:', error);
+      toast.error('Failed to load collection options');
+      if (reset) {
+        setSourceItems([]);
+        setSourceItemsOffset(0);
+        setSourceItemsHasMore(false);
+      }
+    } finally {
+      setSourceItemsLoading(false);
+      setSourceItemsLoadingMore(false);
+    }
+  }, [isCollectionSource, optionsSource?.collectionId, SOURCE_ITEMS_PAGE_SIZE]);
+
   useEffect(() => {
     if (!isCollectionSource || !optionsSource?.collectionId) {
       setSourceItems([]);
+      setSourceItemsOffset(0);
+      setSourceItemsHasMore(false);
       return;
     }
+    fetchSourceItems({ reset: true, offset: 0 });
+  }, [isCollectionSource, optionsSource?.collectionId, fetchSourceItems]);
+
+  // Preserve currently selected default item even if it is not in the first page.
+  useEffect(() => {
+    const collectionId = optionsSource?.collectionId;
+    const selectedDefaultId = optionsSource?.defaultItemId;
+    if (!isCollectionSource || !collectionId || !selectedDefaultId) return;
+    if (sourceItems.some(item => item.id === selectedDefaultId)) return;
+
     let cancelled = false;
-    collectionsApi.getItems(optionsSource.collectionId, { limit: 200 }).then(res => {
-      if (!cancelled && !res.error) {
-        setSourceItems(res.data?.items || []);
-      }
-    });
+    collectionsApi.getItemById(collectionId, selectedDefaultId)
+      .then(res => {
+        if (cancelled || res.error || !res.data) return;
+        setSourceItems(prev => prev.some(item => item.id === res.data!.id) ? prev : [res.data!, ...prev]);
+      })
+      .catch((error) => {
+        console.error('Failed to load selected default item:', error);
+      });
     return () => { cancelled = true; };
-  }, [isCollectionSource, optionsSource?.collectionId]);
+  }, [isCollectionSource, optionsSource?.collectionId, optionsSource?.defaultItemId, sourceItems]);
 
   const displayField = findDisplayField(sourceCollectionFields);
 
@@ -598,6 +663,29 @@ export default function SelectOptionsSettings({
                         {getItemDisplayName(item, displayField)}
                       </SelectItem>
                     ))}
+                    {sourceItemsLoading && (
+                      <div className="px-2 py-2 text-xs text-muted-foreground">Loading options...</div>
+                    )}
+                    {!sourceItemsLoading && sourceItems.length === 0 && (
+                      <div className="px-2 py-2 text-xs text-muted-foreground">No items found</div>
+                    )}
+                    {sourceItemsHasMore && (
+                      <div className="px-1 py-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full justify-center text-xs"
+                          disabled={sourceItemsLoadingMore}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            fetchSourceItems({ reset: false, offset: sourceItemsOffset });
+                          }}
+                        >
+                          {sourceItemsLoadingMore ? 'Loading...' : 'Load more'}
+                        </Button>
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

@@ -7,7 +7,7 @@ import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { renderCollectionItemsToHtml, loadTranslationsForLocale } from '@/lib/page-fetcher';
 import { noCache } from '@/lib/api-response';
-import type { Layer, CollectionItemWithValues } from '@/types';
+import type { Layer, CollectionItem, CollectionItemWithValues } from '@/types';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -421,6 +421,43 @@ async function getFilteredItemIds(
   return { matchingIds: [...unionIds], total: unionIds.size };
 }
 
+function reorderItemsById(items: CollectionItem[], idOrder: string[]): CollectionItem[] {
+  const byId = new Map(items.map(item => [item.id, item]));
+  const ordered: CollectionItem[] = [];
+  for (const id of idOrder) {
+    const item = byId.get(id);
+    if (item) ordered.push(item);
+  }
+  return ordered;
+}
+
+async function getFieldValuesForItems(
+  fieldId: string,
+  isPublished: boolean,
+  itemIds: string[],
+): Promise<Map<string, string>> {
+  if (itemIds.length === 0) return new Map();
+  const client = await getSupabaseAdmin();
+  if (!client) throw new Error('Supabase client not configured');
+
+  const rows = await chunkedQuery<{ item_id: string; value: string | null }>(
+    chunk => client
+      .from('collection_item_values')
+      .select('item_id, value')
+      .eq('field_id', fieldId)
+      .eq('is_published', isPublished)
+      .is('deleted_at', null)
+      .in('item_id', chunk),
+    itemIds,
+  );
+
+  const valueMap = new Map<string, string>();
+  for (const row of rows) {
+    valueMap.set(row.item_id, row.value ?? '');
+  }
+  return valueMap;
+}
+
 /**
  * POST /ycode/api/collections/[id]/items/filter
  *
@@ -472,43 +509,63 @@ export async function POST(
       });
     }
 
-    const { items: rawItems } = await getItemsByCollectionId(collectionId, true, {
-      itemIds: matchingIds,
-    });
-    const valuesByItem = await getValuesByItemIds(
-      rawItems.map(i => i.id),
-      true,
-    );
-    const items: CollectionItemWithValues[] = rawItems.map(item => ({
-      ...item,
-      values: valuesByItem[item.id] || {},
-    }));
+    const pageOffset = Math.max(0, offset || 0);
+    const pageLimit = limit && limit > 0 ? limit : filteredTotal;
+    let pageRawItems: CollectionItem[] = [];
+    let pageItemIds: string[] = [];
 
-    if (sortBy && sortBy !== 'none') {
-      if (sortBy === 'manual') {
-        items.sort((a, b) => a.manual_order - b.manual_order);
-      } else if (sortBy === 'random') {
-        items.sort(() => Math.random() - 0.5);
-      } else {
-        items.sort((a, b) => {
-          const aVal = a.values[sortBy] || '';
-          const bVal = b.values[sortBy] || '';
-          const aNum = parseFloat(String(aVal));
-          const bNum = parseFloat(String(bVal));
-          if (!isNaN(aNum) && !isNaN(bNum)) {
-            return sortOrder === 'desc' ? bNum - aNum : aNum - bNum;
-          }
-          return sortOrder === 'desc'
-            ? String(bVal).localeCompare(String(aVal))
-            : String(aVal).localeCompare(String(bVal));
+    if (!sortBy || sortBy === 'none' || sortBy === 'manual') {
+      // Let DB do ordering and pagination for cheap paths.
+      const { items } = await getItemsByCollectionId(collectionId, true, {
+        itemIds: matchingIds,
+        limit: pageLimit,
+        offset: pageOffset,
+      });
+      pageRawItems = items;
+      pageItemIds = items.map(item => item.id);
+    } else if (sortBy === 'random') {
+      const randomizedIds = [...matchingIds].sort(() => Math.random() - 0.5);
+      pageItemIds = randomizedIds.slice(pageOffset, pageOffset + pageLimit);
+      if (pageItemIds.length > 0) {
+        const { items } = await getItemsByCollectionId(collectionId, true, {
+          itemIds: pageItemIds,
         });
+        pageRawItems = reorderItemsById(items, pageItemIds);
+      }
+    } else {
+      // For field-based sort, sort IDs using just the sort field values first,
+      // then hydrate only the requested page window.
+      const sortValueByItem = await getFieldValuesForItems(sortBy, true, matchingIds);
+      const sortedIds = [...matchingIds].sort((a, b) => {
+        const aVal = sortValueByItem.get(a) || '';
+        const bVal = sortValueByItem.get(b) || '';
+        const aNum = parseFloat(String(aVal));
+        const bNum = parseFloat(String(bVal));
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return sortOrder === 'desc' ? bNum - aNum : aNum - bNum;
+        }
+        return sortOrder === 'desc'
+          ? String(bVal).localeCompare(String(aVal))
+          : String(aVal).localeCompare(String(bVal));
+      });
+      pageItemIds = sortedIds.slice(pageOffset, pageOffset + pageLimit);
+      if (pageItemIds.length > 0) {
+        const { items } = await getItemsByCollectionId(collectionId, true, {
+          itemIds: pageItemIds,
+        });
+        pageRawItems = reorderItemsById(items, pageItemIds);
       }
     }
 
-    const pageOffset = Math.max(0, offset || 0);
-    const pageLimit = limit && limit > 0 ? limit : items.length;
-    const paginatedItems = items.slice(pageOffset, pageOffset + pageLimit);
-    const hasMore = pageOffset + paginatedItems.length < items.length;
+    const valuesByItem = await getValuesByItemIds(
+      pageRawItems.map(i => i.id),
+      true,
+    );
+    const paginatedItems: CollectionItemWithValues[] = pageRawItems.map(item => ({
+      ...item,
+      values: valuesByItem[item.id] || {},
+    }));
+    const hasMore = pageOffset + paginatedItems.length < filteredTotal;
 
     const collectionFields = await getFieldsByCollectionId(collectionId, true, { excludeComputed: true });
     const slugField = collectionFields.find(f => f.key === 'slug');
