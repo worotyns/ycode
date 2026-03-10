@@ -205,8 +205,6 @@ export default function ConditionalVisibilitySettings({
   onLayerUpdate,
   fieldGroups,
 }: ConditionalVisibilitySettingsProps) {
-  const [isOpen, setIsOpen] = useState(false);
-
   // Derive flat list of fields from fieldGroups
   const allFieldsFromGroups = useMemo(() => flattenFieldGroups(fieldGroups), [fieldGroups]);
 
@@ -252,7 +250,10 @@ export default function ConditionalVisibilitySettings({
     });
   }, [layer, onLayerUpdate]);
 
-  if (!layer) {
+  const hasConditions = groups.length > 0;
+  const hasAvailableSources = allFieldsFromGroups.length > 0 || pageCollectionLayers.length > 0;
+
+  if (!layer || (!hasConditions && !hasAvailableSources)) {
     return null;
   }
 
@@ -696,9 +697,8 @@ export default function ConditionalVisibilitySettings({
   return (
     <SettingsPanel
       title="Conditional visibility"
-      collapsible
-      isOpen={isOpen}
-      onToggle={() => setIsOpen(!isOpen)}
+      isOpen={hasConditions}
+      onToggle={() => {}}
       action={
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -714,12 +714,7 @@ export default function ConditionalVisibilitySettings({
       }
     >
       <div className="flex flex-col gap-3">
-        {groups.length === 0 ? (
-          <div className="text-xs text-muted-foreground text-center py-4">
-            No conditions set. Click + to add a condition.
-          </div>
-        ) : (
-          groups.map((group, groupIndex) => (
+        {groups.map((group, groupIndex) => (
             <React.Fragment key={group.id}>
               {groupIndex > 0 && (
                 <div className="flex items-center gap-2 py-1">
@@ -757,8 +752,8 @@ export default function ConditionalVisibilitySettings({
                 </ul>
               </div>
             </React.Fragment>
-          ))
-        )}
+        ))
+        }
       </div>
     </SettingsPanel>
   );

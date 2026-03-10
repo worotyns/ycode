@@ -157,7 +157,6 @@ const RightSidebar = React.memo(function RightSidebar({
   const [customId, setCustomId] = useState<string>('');
   const [containerTag, setContainerTag] = useState<string>('div');
   const [textTag, setTextTag] = useState<string>('p');
-  const [customAttributesOpen, setCustomAttributesOpen] = useState(false);
   const [showAddAttributePopover, setShowAddAttributePopover] = useState(false);
   const [newAttributeName, setNewAttributeName] = useState('');
   const [newAttributeValue, setNewAttributeValue] = useState('');
@@ -244,6 +243,9 @@ const RightSidebar = React.memo(function RightSidebar({
 
   const selectedLayerRef = useRef(selectedLayer);
   selectedLayerRef.current = selectedLayer;
+
+  const hasCustomAttributes = !!(selectedLayer?.settings?.customAttributes &&
+    Object.keys(selectedLayer.settings.customAttributes).length > 0);
 
   // Get the layer whose interactions we're editing (different from selected layer during target selection)
   const interactionOwnerLayer: Layer | null = useMemo(() => {
@@ -1849,6 +1851,7 @@ const RightSidebar = React.memo(function RightSidebar({
 
         <TabsContent value="settings" className="flex-1 overflow-y-auto no-scrollbar mt-0 data-[state=inactive]:hidden">
           <div className="flex flex-col divide-y">
+            {selectedLayerId !== 'body' && (<>
             {/* Attributes */}
             <div className="flex flex-col gap-2 pb-5 pt-5">
               <div className="grid grid-cols-3">
@@ -2043,7 +2046,7 @@ const RightSidebar = React.memo(function RightSidebar({
             })()}
 
             {/* Link Settings - hide for form-related layers, buttons inside forms, and layers inside buttons */}
-            {selectedLayer && !['form', 'select', 'input', 'textarea', 'checkbox', 'radio', 'label', 'lightbox'].includes(selectedLayer.name) && selectedLayer.settings?.tag !== 'label' && !shouldHideLinkSettings && (
+            {selectedLayer && !['form', 'select', 'input', 'textarea', 'checkbox', 'radio', 'label', 'lightbox', 'hr'].includes(selectedLayer.name) && selectedLayer.settings?.tag !== 'label' && !shouldHideLinkSettings && (
               <LinkSettings
                 layer={selectedLayer}
                 onLayerUpdate={handleLayerUpdate}
@@ -2572,13 +2575,13 @@ const RightSidebar = React.memo(function RightSidebar({
               onLayerUpdate={handleLayerUpdate}
               fieldGroups={fieldGroups}
             />
+            </>)}
 
             {/* Custom Attributes Panel */}
             <SettingsPanel
               title="Custom attributes"
-              collapsible
-              isOpen={customAttributesOpen}
-              onToggle={() => setCustomAttributesOpen(!customAttributesOpen)}
+              isOpen={hasCustomAttributes}
+              onToggle={() => {}}
               action={
                 <Popover open={showAddAttributePopover} onOpenChange={setShowAddAttributePopover}>
                   <PopoverTrigger asChild>
@@ -2637,8 +2640,7 @@ const RightSidebar = React.memo(function RightSidebar({
                 </Popover>
               }
             >
-              {selectedLayer?.settings?.customAttributes &&
-               Object.keys(selectedLayer.settings.customAttributes).length > 0 ? (
+              {selectedLayer?.settings?.customAttributes && (
                 <div className="flex flex-col gap-1">
                   {Object.entries(selectedLayer.settings.customAttributes).map(([name, value]) => (
                     <div
@@ -2656,11 +2658,7 @@ const RightSidebar = React.memo(function RightSidebar({
                     </div>
                   ))}
                 </div>
-                ) : (
-                <Empty>
-                  <EmptyDescription>HTML attributes can be used to append additional information to your elements.</EmptyDescription>
-                </Empty>
-                )}
+              )}
             </SettingsPanel>
           </div>
         </TabsContent>
