@@ -500,7 +500,7 @@ const EffectControls = memo(function EffectControls({ layer, onLayerUpdate, acti
               </div>
           </div>
 
-          {!showTextStyleControls && (
+          {(!showTextStyleControls || activeTextStyleKey === 'richTextImage') && (
             <div className="grid grid-cols-3 items-start">
               <Label variant="muted" className="py-2">Shadow</Label>
               <div className="col-span-2 *:w-full flex flex-col gap-2">
