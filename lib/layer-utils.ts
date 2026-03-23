@@ -597,14 +597,19 @@ export function extractBlockText(block: any): string {
 
 /**
  * Recursively extract all unique inline mark types from a TipTap content block.
+ * Normalizes TipTap mark names to style keys (e.g., richTextLink → link).
  */
 function extractInlineMarks(block: any): string[] {
+  const MARK_NAME_MAP: Record<string, string> = {
+    richTextLink: 'link',
+  };
+
   const marks = new Set<string>();
 
   function traverse(node: any) {
     if (node.marks && Array.isArray(node.marks)) {
       node.marks.forEach((mark: any) => {
-        if (mark.type) marks.add(mark.type);
+        if (mark.type) marks.add(MARK_NAME_MAP[mark.type] || mark.type);
       });
     }
     if (node.content && Array.isArray(node.content)) {
