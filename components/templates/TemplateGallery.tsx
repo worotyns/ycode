@@ -22,6 +22,7 @@ import {
 import Icon from '@/components/ui/icon';
 import { Label } from '@/components/ui/label';
 import BuilderLoading from '@/components/BuilderLoading';
+import { Empty, EmptyDescription, EmptyTitle } from '@/components/ui/empty';
 
 interface Template {
   id: string;
@@ -159,7 +160,7 @@ export function TemplateGallery({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Spinner className="h-8 w-8" />
+        <Spinner />
       </div>
     );
   }
@@ -253,11 +254,10 @@ export function TemplateGallery({
 
       {/* Empty state for filtered results */}
       {filteredTemplates.length === 0 && templates.length > 0 && (
-        <EmptyState
-          icon="layout-template"
-          title="No templates in this category"
-          description="Try selecting a different category."
-        />
+        <Empty>
+          <EmptyTitle>No templates in this category</EmptyTitle>
+          <EmptyDescription>Try searching a different category.</EmptyDescription>
+        </Empty>
       )}
 
       {/* Apply Confirmation Dialog (only when not in immediate mode) */}

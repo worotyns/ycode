@@ -1,4 +1,4 @@
-import type { Collection, CollectionFieldType } from '@/types';
+import type { Collection, CollectionFieldType, CollectionSorting } from '@/types';
 import { sanitizeSlug } from './page-utils';
 
 /**
@@ -55,6 +55,14 @@ export function parseMultiReferenceValue(value: unknown): string[] {
  * @param collections - Array of collections to sort
  * @returns Sorted array of collections
  */
+/** Extract sortBy/sortOrder API params from a collection's sorting config. */
+export function getSortParams(sorting: CollectionSorting | null | undefined): { sortBy?: string; sortOrder?: string } {
+  if (!sorting || sorting.direction === 'manual') {
+    return { sortBy: 'manual', sortOrder: undefined };
+  }
+  return { sortBy: sorting.field, sortOrder: sorting.direction };
+}
+
 export function sortCollectionsByOrder(collections: Collection[]): Collection[] {
   return [...collections].sort((a, b) => {
     // If orders are different, sort by order
@@ -92,7 +100,7 @@ export function castValue(value: string | null, type: CollectionFieldType): any 
       return value === 'true' || value === '1' || value === 'yes';
 
     case 'date':
-      // Return as ISO string for consistency
+    case 'date_only':
       return value;
 
     case 'reference':
@@ -161,7 +169,7 @@ export function valueToString(value: any, type: CollectionFieldType): string | n
       return String(value);
 
     case 'date':
-      // Expect ISO string or Date object
+    case 'date_only':
       if (value instanceof Date) {
         return value.toISOString();
       }

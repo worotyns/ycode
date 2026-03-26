@@ -34,7 +34,7 @@ export function resolveInlineVariables(
 
       if (parsed.type === 'field' && parsed.data?.field_id) {
         const fieldValue = collectionItem.values[parsed.data.field_id];
-        return formatFieldValue(fieldValue, parsed.data.field_type, timezone);
+        return formatFieldValue(fieldValue, parsed.data.field_type, timezone, parsed.data.format);
       }
     } catch {
       // Invalid JSON or not a field variable, leave as is
@@ -84,7 +84,7 @@ export function resolveInlineVariablesFromData(
           parsed.data.collection_layer_id,
           layerDataMap
         );
-        return formatFieldValue(fieldValue, parsed.data.field_type, timezone);
+        return formatFieldValue(fieldValue, parsed.data.field_type, timezone, parsed.data.format);
       }
     } catch {
       // Invalid JSON

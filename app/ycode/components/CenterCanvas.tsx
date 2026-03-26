@@ -62,6 +62,7 @@ import { cn } from '@/lib/utils';
 import { getCollectionVariable, canDeleteLayer, findLayerById, findParentCollectionLayer, canLayerHaveLink, updateLayerProps, removeRichTextSublayer } from '@/lib/layer-utils';
 import { CANVAS_BORDER, CANVAS_PADDING } from '@/lib/canvas-utils';
 import { buildFieldGroupsForLayer, flattenFieldGroups, filterFieldGroupsByType, SIMPLE_TEXT_FIELD_TYPES } from '@/lib/collection-field-utils';
+import { buildFieldVariableData } from '@/lib/variable-format-utils';
 import { getRichTextValue } from '@/lib/tiptap-utils';
 import { DropContainerIndicator, DropLineIndicator } from '@/components/DropIndicators';
 import { DragCaptureOverlay } from '@/components/DragCaptureOverlay';
@@ -2147,15 +2148,7 @@ const CenterCanvas = React.memo(function CenterCanvas({
                         const flatFields = flattenFieldGroups(fieldGroups);
                         const field = flatFields.find(f => f.id === fieldId);
                         addFieldVariable(
-                          {
-                            type: 'field',
-                            data: {
-                              field_id: fieldId,
-                              relationships: relationshipPath,
-                              source,
-                              field_type: field?.type || null,
-                            },
-                          },
+                          buildFieldVariableData(fieldId, relationshipPath, field?.type ?? null, source),
                           flatFields,
                           collectionFieldsFromStore
                         );

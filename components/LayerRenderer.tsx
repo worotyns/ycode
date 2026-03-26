@@ -948,7 +948,7 @@ const LayerItem: React.FC<{
   );
 
   // Get image alt text, resolve inline variables, and apply translation if available
-  const rawImageAlt = getDynamicTextContent(effectiveImageSettings?.alt) || 'Image';
+  const rawImageAlt = String(getDynamicTextContent(effectiveImageSettings?.alt) || 'Image');
   const originalImageAlt = rawImageAlt.includes('<ycode-inline-variable>')
     ? resolveInlineVariablesFromData(rawImageAlt, collectionLayerData, pageCollectionItemData ?? undefined, timezone, effectiveLayerDataMap)
     : rawImageAlt;

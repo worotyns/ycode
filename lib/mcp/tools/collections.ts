@@ -31,11 +31,11 @@ export function registerCollectionTools(server: McpServer) {
     `Add a field to a collection's schema.
 
 FIELD TYPES:
-- text, number, boolean, date, reference, rich-text, color, asset, status`,
+- text, number, boolean, date (datetime), date_only (date without time), reference, rich-text, color, asset, status`,
     {
       collection_id: z.string().describe('The collection ID'),
       name: z.string().describe('Field display name'),
-      type: z.enum(['text', 'number', 'boolean', 'date', 'reference', 'multi_reference', 'rich_text', 'image', 'audio', 'video', 'document', 'link', 'email', 'phone', 'color', 'status']).describe('Field data type'),
+      type: z.enum(['text', 'number', 'boolean', 'date', 'date_only', 'reference', 'multi_reference', 'rich_text', 'image', 'audio', 'video', 'document', 'link', 'email', 'phone', 'color', 'status']).describe('Field data type (date = datetime, date_only = date without time)'),
       key: z.string().optional().describe('Unique field key (auto-generated from name if omitted)'),
       reference_collection_id: z.string().optional().describe('For reference fields: the target collection ID'),
     },
@@ -158,7 +158,7 @@ FIELD TYPES:
     {
       field_id: z.string().describe('The field ID to update'),
       name: z.string().optional().describe('New field name'),
-      type: z.enum(['text', 'number', 'boolean', 'date', 'reference', 'multi_reference', 'rich_text', 'image', 'audio', 'video', 'document', 'link', 'email', 'phone', 'color', 'status']).optional().describe('New field type'),
+      type: z.enum(['text', 'number', 'boolean', 'date', 'date_only', 'reference', 'multi_reference', 'rich_text', 'image', 'audio', 'video', 'document', 'link', 'email', 'phone', 'color', 'status']).optional().describe('New field type (date = datetime, date_only = date without time)'),
       reference_collection_id: z.string().optional().describe('For reference fields: target collection ID'),
     },
     async ({ field_id, ...updates }) => {

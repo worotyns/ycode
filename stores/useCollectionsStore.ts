@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { collectionsApi } from '@/lib/api';
-import { sortCollectionsByOrder } from '@/lib/collection-utils';
+import { sortCollectionsByOrder, getSortParams } from '@/lib/collection-utils';
 import { MULTI_ASSET_COLLECTION_ID, findStatusFieldId, buildStatusValue, getStatusFlagsFromAction } from '@/lib/collection-field-utils';
 import type { StatusAction } from '@/lib/collection-field-utils';
 import { useAssetsStore } from '@/stores/useAssetsStore';
@@ -117,28 +117,57 @@ export const useCollectionsStore = create<CollectionsStore>((set, get) => ({
       return;
     }
 
-    // Preload 25 items per collection using optimized batch queries (2 queries total)
-    const collectionIds = collections.map(c => c.id);
-    const response = await collectionsApi.getTopItemsPerCollection(collectionIds, 25);
+    const PRELOAD_LIMIT = 25;
 
-    if (response.error) {
-      throw new Error(`Failed to preload items: ${response.error}`);
-    }
-
-    const batchItems = response.data?.items || {};
-    const itemsMap: Record<string, CollectionItemWithValues[]> = {};
-    const itemsTotalCountMap: Record<string, number> = {};
-
-    // Use draft_items_count from collections for accurate totals (already fetched)
-    // Sort preloaded items based on each collection's sorting settings
-    const queryMap: Record<string, ItemsQueryParams> = {};
+    // Split collections: batch preload works for manual sort or when all items fit
+    const batchCollections: Collection[] = [];
+    const sortedCollections_: Collection[] = [];
 
     collections.forEach(collection => {
+      const sorting = collection.sorting;
+      const totalCount = collection.draft_items_count ?? 0;
+      const needsServerSort = sorting && sorting.direction !== 'manual' && totalCount > PRELOAD_LIMIT;
+      if (needsServerSort) {
+        sortedCollections_.push(collection);
+      } else {
+        batchCollections.push(collection);
+      }
+    });
+
+    // Fetch both groups in parallel:
+    // 1) Batch endpoint for manual-sort / small collections
+    // 2) Individual sorted API calls for collections needing server-side sort
+    const batchIds = batchCollections.map(c => c.id);
+    const [batchResponse, ...sortedResponses] = await Promise.all([
+      batchIds.length > 0
+        ? collectionsApi.getTopItemsPerCollection(batchIds, PRELOAD_LIMIT)
+        : Promise.resolve({ data: { items: {} as Record<string, { items: CollectionItemWithValues[] }> }, error: null }),
+      ...sortedCollections_.map(c =>
+        collectionsApi.getItems(c.id, {
+          page: 1,
+          limit: PRELOAD_LIMIT,
+          sortBy: c.sorting!.field,
+          sortOrder: c.sorting!.direction,
+        })
+      ),
+    ]);
+
+    if (batchResponse.error) {
+      throw new Error(`Failed to preload items: ${batchResponse.error}`);
+    }
+
+    const batchItems = batchResponse.data?.items || {};
+    const itemsMap: Record<string, CollectionItemWithValues[]> = {};
+    const itemsTotalCountMap: Record<string, number> = {};
+    const queryMap: Record<string, ItemsQueryParams> = {};
+
+    // Process batch-preloaded collections (manual sort or total <= limit)
+    batchCollections.forEach(collection => {
       const batchResult = batchItems[collection.id];
       let preloadedItems = batchResult?.items || [];
-
-      // Apply collection sorting so items are in the correct order from the start
       const sorting = collection.sorting;
+      const totalCount = collection.draft_items_count ?? 0;
+
       if (sorting && sorting.direction !== 'manual') {
         preloadedItems = [...preloadedItems].sort((a, b) => {
           const aValue = a.values[sorting.field] || '';
@@ -154,12 +183,17 @@ export const useCollectionsStore = create<CollectionsStore>((set, get) => ({
       }
 
       itemsMap[collection.id] = preloadedItems;
-      itemsTotalCountMap[collection.id] = collection.draft_items_count ?? 0;
+      itemsTotalCountMap[collection.id] = totalCount;
+      queryMap[collection.id] = { page: 1, limit: PRELOAD_LIMIT, ...getSortParams(sorting) };
+    });
 
-      // Persist sort params so reloadCurrentItems uses the correct order
-      const sortBy = sorting?.direction === 'manual' ? 'manual' : sorting?.field;
-      const sortOrder = sorting?.direction === 'manual' ? undefined : sorting?.direction;
-      queryMap[collection.id] = { page: 1, limit: 25, sortBy, sortOrder };
+    // Process server-sorted collections
+    sortedCollections_.forEach((collection, i) => {
+      const resp = sortedResponses[i];
+      const totalCount = collection.draft_items_count ?? 0;
+      itemsMap[collection.id] = resp.data?.items || [];
+      itemsTotalCountMap[collection.id] = resp.data?.total ?? totalCount;
+      queryMap[collection.id] = { page: 1, limit: PRELOAD_LIMIT, ...getSortParams(collection.sorting) };
     });
 
     set((state) => ({
@@ -571,10 +605,14 @@ export const useCollectionsStore = create<CollectionsStore>((set, get) => ({
     }));
 
     try {
-      const response = await collectionsApi.getItems(collectionId, { page, limit, sortBy, sortOrder });
+      const response = await collectionsApi.getItems(collectionId, { page, limit, sortBy, sortOrder, includeAssets: true });
 
       if (response.error) {
         throw new Error(response.error);
+      }
+
+      if (response.data?.referencedAssets?.length) {
+        useAssetsStore.getState().addAssetsToCache(response.data.referencedAssets);
       }
 
       set(state => ({
@@ -927,10 +965,14 @@ export const useCollectionsStore = create<CollectionsStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await collectionsApi.searchItems(collectionId, query, { page, limit, sortBy, sortOrder });
+      const response = await collectionsApi.searchItems(collectionId, query, { page, limit, sortBy, sortOrder, includeAssets: true });
 
       if (response.error) {
         throw new Error(response.error);
+      }
+
+      if (response.data?.referencedAssets?.length) {
+        useAssetsStore.getState().addAssetsToCache(response.data.referencedAssets);
       }
 
       set(state => ({

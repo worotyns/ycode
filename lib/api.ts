@@ -534,8 +534,9 @@ export const collectionsApi = {
       sortOrder?: string;
       offset?: number;
       filters?: Array<{ fieldId: string; operator: string; value: string }>;
+      includeAssets?: boolean;
     }
-  ): Promise<ApiResponse<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>> {
+  ): Promise<ApiResponse<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number; referencedAssets?: Asset[] }>> {
     const params = new URLSearchParams();
     if (options?.page) params.append('page', options.page.toString());
     if (options?.limit) params.append('limit', options.limit.toString());
@@ -544,9 +545,10 @@ export const collectionsApi = {
     if (options?.sortOrder) params.append('sortOrder', options.sortOrder);
     if (options?.offset !== undefined) params.append('offset', options.offset.toString());
     if (options?.filters?.length) params.append('filters', JSON.stringify(options.filters));
+    if (options?.includeAssets) params.append('includeAssets', 'true');
     const queryString = params.toString();
     const url = `/ycode/api/collections/${collectionId}/items${queryString ? `?${queryString}` : ''}`;
-    return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>(url);
+    return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number; referencedAssets?: Asset[] }>(url);
   },
 
   async getItemById(collectionId: string, itemId: string): Promise<ApiResponse<CollectionItemWithValues>> {
@@ -591,16 +593,17 @@ export const collectionsApi = {
   async searchItems(
     collectionId: string,
     query: string,
-    options?: { page?: number; limit?: number; sortBy?: string; sortOrder?: string }
-  ): Promise<ApiResponse<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>> {
+    options?: { page?: number; limit?: number; sortBy?: string; sortOrder?: string; includeAssets?: boolean }
+  ): Promise<ApiResponse<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number; referencedAssets?: Asset[] }>> {
     const params = new URLSearchParams();
     params.append('search', query);
     if (options?.page) params.append('page', options.page.toString());
     if (options?.limit) params.append('limit', options.limit.toString());
     if (options?.sortBy) params.append('sortBy', options.sortBy);
     if (options?.sortOrder) params.append('sortOrder', options.sortOrder);
+    if (options?.includeAssets) params.append('includeAssets', 'true');
     const url = `/ycode/api/collections/${collectionId}/items?${params.toString()}`;
-    return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number }>(url);
+    return apiRequest<{ items: CollectionItemWithValues[]; total: number; page: number; limit: number; referencedAssets?: Asset[] }>(url);
   },
 
   // Published items

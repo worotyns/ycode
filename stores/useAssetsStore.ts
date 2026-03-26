@@ -202,7 +202,8 @@ export const useAssetsStore = create<AssetsStore>((set, get) => ({
       return cached;
     }
 
-    // If not in cache and store is loaded, it doesn't exist
+    // If store is loaded, asset isn't known — skip background fetch.
+    // Assets are preloaded via items API (includeAssets=true).
     if (state.isLoaded) {
       return null;
     }
@@ -217,7 +218,9 @@ export const useAssetsStore = create<AssetsStore>((set, get) => ({
       return null;
     }
 
-    // Mark as pending and fetch from API in background
+    // Mark as pending and fetch from API in background.
+    // ID stays in the set even after completion to prevent re-fetching
+    // assets that don't exist (negative cache).
     pendingFetches.add(id);
     
     fetch(`/ycode/api/assets/${id}`)
@@ -225,6 +228,7 @@ export const useAssetsStore = create<AssetsStore>((set, get) => ({
       .then(result => {
         if (result?.data) {
           const asset = result.data;
+          pendingFetches.delete(id);
           set((state) => ({
             assetsById: {
               ...state.assetsById,
@@ -235,9 +239,6 @@ export const useAssetsStore = create<AssetsStore>((set, get) => ({
       })
       .catch(err => {
         console.error('Failed to fetch asset:', err);
-      })
-      .finally(() => {
-        pendingFetches.delete(id);
       });
 
     return null;

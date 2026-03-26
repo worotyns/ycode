@@ -29,6 +29,7 @@ import Icon from '@/components/ui/icon';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FIELD_TYPES_BY_CATEGORY, ASSET_FIELD_TYPES, supportsDefaultValue, isAssetFieldType, getFileManagerCategory, getAssetFieldLabel, type FieldType } from '@/lib/collection-field-utils';
 import { parseMultiReferenceValue } from '@/lib/collection-utils';
+import { clampDateInputValue } from '@/lib/date-format-utils';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useAssetsStore } from '@/stores/useAssetsStore';
@@ -359,7 +360,15 @@ export default function FieldFormDialog({
                     id="field-default"
                     type="datetime-local"
                     value={fieldDefault}
-                    onChange={(e) => setFieldDefault(e.target.value)}
+                    onChange={(e) => setFieldDefault(clampDateInputValue(e.target.value))}
+                    autoComplete="off"
+                  />
+                ) : fieldType === 'date_only' ? (
+                  <Input
+                    id="field-default"
+                    type="date"
+                    value={fieldDefault}
+                    onChange={(e) => setFieldDefault(clampDateInputValue(e.target.value))}
                     autoComplete="off"
                   />
                 ) : fieldType === 'email' ? (

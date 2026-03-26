@@ -11,7 +11,6 @@
  */
 
 import React, { useEffect, useMemo, useCallback, forwardRef, useImperativeHandle, useRef } from 'react';
-import { createRoot } from 'react-dom/client';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { Mark, mergeAttributes } from '@tiptap/core';
 import Document from '@tiptap/extension-document';
@@ -32,14 +31,11 @@ import { RichTextImage } from '@/lib/tiptap-extensions/rich-text-image';
 import { getTextStyleClasses } from '@/lib/text-format-utils';
 import type { Layer, TextStyle, CollectionField, Collection } from '@/types';
 import type { FieldVariable } from '@/types';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import Icon from '@/components/ui/icon';
 import {
   parseValueToContent,
   getVariableLabel,
 } from '@/lib/cms-variables-utils';
-import { DynamicVariable, getDynamicVariableLabel } from '@/lib/tiptap-extensions/dynamic-variable';
+import { createDynamicVariableNodeView } from '@/lib/dynamic-variable-view';
 import { RichTextComponent } from '@/lib/tiptap-extensions/rich-text-component';
 import { useCanvasTextEditorStore } from '@/stores/useCanvasTextEditorStore';
 import { RichTextLink } from '@/lib/tiptap-extensions/rich-text-link';
@@ -76,61 +72,7 @@ export interface CanvasTextEditorHandle {
  * DynamicVariable with React node view for the canvas text editor.
  * Extends the shared extension with canvas-specific Badge styling.
  */
-const DynamicVariableWithNodeView = DynamicVariable.extend({
-  addNodeView() {
-    return ({ node, getPos, editor }) => {
-      const container = document.createElement('span');
-      container.className = 'inline-block';
-      container.contentEditable = 'false';
-
-      const variable = node.attrs.variable;
-      if (variable) {
-        container.setAttribute('data-variable', JSON.stringify(variable));
-      }
-
-      const label = getDynamicVariableLabel(node);
-
-      const handleDelete = () => {
-        const pos = getPos();
-        if (typeof pos === 'number') {
-          editor.chain().focus().deleteRange({ from: pos, to: pos + 1 }).run();
-        }
-      };
-
-      const root = createRoot(container);
-
-      const renderBadge = () => {
-        root.render(
-          <Badge variant="inline_variable_canvas">
-            <span>{label}</span>
-            {editor.isEditable && (
-              <Button
-                onClick={handleDelete}
-                className="size-4! p-0! -mr-1"
-                variant="inline_variable_canvas"
-              >
-                <Icon name="x" className="size-2" />
-              </Button>
-            )}
-          </Badge>
-        );
-      };
-
-      queueMicrotask(renderBadge);
-
-      const updateListener = () => renderBadge();
-      editor.on('update', updateListener);
-
-      return {
-        dom: container,
-        destroy: () => {
-          editor.off('update', updateListener);
-          setTimeout(() => root.unmount(), 0);
-        },
-      };
-    };
-  },
-});
+const DynamicVariableWithNodeView = createDynamicVariableNodeView('canvas');
 
 /**
  * All block/mark extensions use a ref so renderHTML always reads the latest textStyles.

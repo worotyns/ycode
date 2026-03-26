@@ -23,6 +23,11 @@ import { findAllParentCollectionLayers, getCollectionVariable } from '@/lib/laye
 // Field Types Configuration
 // =============================================================================
 
+/** Check if a field type stores date/datetime values (date or date_only) */
+export function isDateFieldType(type: CollectionFieldType | string | null | undefined): boolean {
+  return type === 'date' || type === 'date_only';
+}
+
 /** Field type category for grouping in the type selector */
 export type FieldTypeCategory = 'basic' | 'contact' | 'asset' | 'relation';
 
@@ -38,7 +43,8 @@ export const FIELD_TYPES = [
   { value: 'rich_text', label: 'Rich Text', icon: 'rich-text', category: 'basic', hasDefault: true },
   { value: 'number', label: 'Number', icon: 'hash', category: 'basic', hasDefault: true },
   { value: 'boolean', label: 'Boolean', icon: 'check', category: 'basic', hasDefault: true },
-  { value: 'date', label: 'Date', icon: 'calendar', category: 'basic', hasDefault: true },
+  { value: 'date', label: 'Date & Time', icon: 'calendar', category: 'basic', hasDefault: true },
+  { value: 'date_only', label: 'Date', icon: 'calendar', category: 'basic', hasDefault: true },
   { value: 'color', label: 'Color', icon: 'droplet', category: 'basic', hasDefault: true },
   { value: 'email', label: 'Email', icon: 'email', category: 'contact', hasDefault: true },
   { value: 'phone', label: 'Phone', icon: 'phone', category: 'contact', hasDefault: true },
@@ -169,6 +175,7 @@ export function getOperatorsForFieldType(
     case 'number':
       return NUMBER_OPERATORS;
     case 'date':
+    case 'date_only':
       return DATE_OPERATORS;
     case 'boolean':
       return BOOLEAN_OPERATORS;
@@ -449,7 +456,7 @@ export const VIDEO_FIELD_TYPES: CollectionFieldType[] = ['video'];
 export const VIDEO_ID_FIELD_TYPES: CollectionFieldType[] = ['text'];
 
 /** Field types that can be bound to simple text content (excludes rich_text and media/asset types) */
-export const SIMPLE_TEXT_FIELD_TYPES: CollectionFieldType[] = ['text', 'number', 'date', 'email', 'phone'];
+export const SIMPLE_TEXT_FIELD_TYPES: CollectionFieldType[] = ['text', 'number', 'date', 'date_only', 'email', 'phone'];
 
 /** Field types that can be bound to rich text content (excludes media/asset types) */
 export const RICH_TEXT_FIELD_TYPES: CollectionFieldType[] = [...SIMPLE_TEXT_FIELD_TYPES, 'rich_text'];

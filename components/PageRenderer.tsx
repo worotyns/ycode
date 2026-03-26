@@ -1,4 +1,5 @@
 import AnimationInitializer from '@/components/AnimationInitializer';
+import BodyClassApplier from '@/components/BodyClassApplier';
 import ContentHeightReporter from '@/components/ContentHeightReporter';
 import CustomCodeInjector from '@/components/CustomCodeInjector';
 import LayerRenderer from '@/components/LayerRenderer';
@@ -391,15 +392,8 @@ export default async function PageRenderer({
         </>
       )}
 
-      {/* Apply body layer classes synchronously before paint */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: (() => {
-            const classes = (bodyClasses || 'bg-white').split(/\s+/).filter(Boolean);
-            return `document.body.classList.add(${classes.map(c => JSON.stringify(c)).join(',')});`;
-          })(),
-        }}
-      />
+      {/* Apply body layer classes */}
+      <BodyClassApplier classes={bodyClasses || 'bg-white'} />
 
       <main
         id="ybody"

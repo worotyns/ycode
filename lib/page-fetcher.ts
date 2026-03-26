@@ -24,6 +24,7 @@ import type { LinkResolutionContext } from '@/lib/link-utils';
 import { getLinkSettingsFromMark } from '@/lib/tiptap-extensions/rich-text-link';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { resolveInlineVariables, resolveInlineVariablesFromData } from '@/lib/inline-variables';
+import { formatFieldValue } from '@/lib/cms-variables-utils';
 import { buildLayerTranslationKey, getTranslationByKey, hasValidTranslationValue, getTranslationValue } from '@/lib/localisation-utils';
 import { formatDateFieldsInItemValues } from '@/lib/date-format-utils';
 import { getSettingByKey } from '@/lib/repositories/settingsRepository';
@@ -34,7 +35,7 @@ import { buildMapEmbedHtml, DEFAULT_MAP_SETTINGS } from '@/lib/map-utils';
 import { getMapboxAccessToken } from '@/lib/map-server';
 import { getAssetsByIds } from '@/lib/repositories/assetRepository';
 import { isVirtualAssetField, findDisplayField } from '@/lib/collection-field-utils';
-import type { FieldVariable, AssetVariable, DynamicTextVariable } from '@/types';
+import type { FieldVariable, AssetVariable, DynamicTextVariable, LinkSettings } from '@/types';
 import type { DesignColorVariable } from '@/types';
 
 // Cached Mapbox access token for synchronous use inside layerToHtml.
@@ -442,6 +443,7 @@ export const fetchPageByPath = cache(async function fetchPageByPath(
 
             // Format date fields in user's timezone
             const timezone = (await getSettingByKey('timezone') as string | null) || 'UTC';
+            const rawItemValues = { ...enhancedItemValues };
             enhancedItemValues = formatDateFieldsInItemValues(enhancedItemValues, collectionFields, timezone);
 
             // Create enhanced collection item with resolved reference values and translations
@@ -457,7 +459,7 @@ export const fetchPageByPath = cache(async function fetchPageByPath(
             // This resolves inline variables like "Name → Location" on the page
             const layersWithInjectedData = await Promise.all(
               layersWithComponents.map((layer: Layer) =>
-                injectCollectionData(layer, enhancedItemValues, collectionFields, isPublished)
+                injectCollectionData(layer, enhancedItemValues, collectionFields, isPublished, undefined, rawItemValues, timezone)
               )
             );
 
@@ -992,6 +994,7 @@ async function resolveReferenceFields(
  * @param fields - Optional collection fields (for reference field resolution)
  * @param isPublished - Whether fetching published data
  * @param layerDataMap - Map of layer ID → item data for layer-specific resolution
+ * @param rawItemValues - Unformatted values (ISO dates) for applying custom format presets
  * @returns Layer with resolved field values
  */
 async function injectCollectionData(
@@ -999,7 +1002,9 @@ async function injectCollectionData(
   itemValues: Record<string, string>,
   fields?: CollectionField[],
   isPublished: boolean = true,
-  layerDataMap?: Record<string, Record<string, string>>
+  layerDataMap?: Record<string, Record<string, string>>,
+  rawItemValues?: Record<string, string>,
+  timezone: string = 'UTC'
 ): Promise<Layer> {
   // Resolve reference fields if we have field definitions
   let enhancedValues = itemValues;
@@ -1008,6 +1013,8 @@ async function injectCollectionData(
   }
 
   const updates: Partial<Layer> = {};
+  // Start with all original variables; each section overwrites only its own key
+  const resolvedVars: Record<string, unknown> = { ...layer.variables };
 
   // Resolve inline variables in text content
   const textVariable = layer.variables?.text;
@@ -1016,8 +1023,6 @@ async function injectCollectionData(
   if (textVariable && textVariable.type === 'dynamic_rich_text') {
     const content = textVariable.data.content;
     if (content && typeof content === 'object') {
-      // Check if content contains block elements (lists) from inline variables
-      // If so, change restrictive tags (p, h1-h6, etc.) to div
       const restrictiveBlockTags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a', 'button'];
       const currentTag = layer.settings?.tag || layer.name || 'div';
       if (restrictiveBlockTags.includes(currentTag) &&
@@ -1028,13 +1033,10 @@ async function injectCollectionData(
         };
       }
 
-      const resolvedContent = resolveRichTextVariables(content, enhancedValues, layerDataMap);
-      updates.variables = {
-        ...layer.variables,
-        text: {
-          type: 'dynamic_rich_text',
-          data: { content: resolvedContent }
-        }
+      const resolvedContent = resolveRichTextVariables(content, enhancedValues, layerDataMap, rawItemValues, timezone);
+      resolvedVars.text = {
+        type: 'dynamic_rich_text',
+        data: { content: resolvedContent },
       };
     }
   }
@@ -1054,14 +1056,11 @@ async function injectCollectionData(
         content_hash: null,
         values: enhancedValues,
       };
-      const resolved = resolveInlineVariablesWithRelationships(textContent, mockItem);
+      const resolved = resolveInlineVariablesWithRelationships(textContent, mockItem, timezone);
 
-      updates.variables = {
-        ...layer.variables,
-        text: {
-          type: 'dynamic_text',
-          data: { content: resolved }
-        }
+      resolvedVars.text = {
+        type: 'dynamic_text',
+        data: { content: resolved },
       };
     }
   }
@@ -1070,13 +1069,9 @@ async function injectCollectionData(
   const imageSrc = layer.variables?.image?.src;
   if (imageSrc && isFieldVariable(imageSrc) && imageSrc.data.field_id) {
     const resolvedValue = resolveFieldValueWithRelationships(imageSrc, enhancedValues, layerDataMap);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      image: {
-        src: createResolvedAssetVariable(imageSrc.data.field_id, resolvedValue, imageSrc),
-        alt: layer.variables?.image?.alt || createDynamicTextVariable(''),
-      },
+    resolvedVars.image = {
+      src: createResolvedAssetVariable(imageSrc.data.field_id, resolvedValue, imageSrc),
+      alt: layer.variables?.image?.alt || createDynamicTextVariable(''),
     };
   }
 
@@ -1084,13 +1079,9 @@ async function injectCollectionData(
   const videoSrc = layer.variables?.video?.src;
   if (videoSrc && isFieldVariable(videoSrc) && videoSrc.data.field_id) {
     const resolvedValue = resolveFieldValueWithRelationships(videoSrc, enhancedValues, layerDataMap);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      video: {
-        ...layer.variables?.video,
-        src: createResolvedAssetVariable(videoSrc.data.field_id, resolvedValue, videoSrc),
-      },
+    resolvedVars.video = {
+      ...layer.variables?.video,
+      src: createResolvedAssetVariable(videoSrc.data.field_id, resolvedValue, videoSrc),
     };
   }
 
@@ -1098,13 +1089,9 @@ async function injectCollectionData(
   const audioSrc = layer.variables?.audio?.src;
   if (audioSrc && isFieldVariable(audioSrc) && audioSrc.data.field_id) {
     const resolvedValue = resolveFieldValueWithRelationships(audioSrc, enhancedValues, layerDataMap);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      audio: {
-        ...layer.variables?.audio,
-        src: createResolvedAssetVariable(audioSrc.data.field_id, resolvedValue, audioSrc),
-      },
+    resolvedVars.audio = {
+      ...layer.variables?.audio,
+      src: createResolvedAssetVariable(audioSrc.data.field_id, resolvedValue, audioSrc),
     };
   }
 
@@ -1112,12 +1099,8 @@ async function injectCollectionData(
   const bgImageSrc = layer.variables?.backgroundImage?.src;
   if (bgImageSrc && isFieldVariable(bgImageSrc) && bgImageSrc.data.field_id) {
     const resolvedValue = resolveFieldValueWithRelationships(bgImageSrc, enhancedValues, layerDataMap);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      backgroundImage: {
-        src: createResolvedAssetVariable(bgImageSrc.data.field_id, resolvedValue, bgImageSrc),
-      },
+    resolvedVars.backgroundImage = {
+      src: createResolvedAssetVariable(bgImageSrc.data.field_id, resolvedValue, bgImageSrc),
     };
   }
 
@@ -1158,6 +1141,9 @@ async function injectCollectionData(
     }
   }
 
+  // Assign all resolved variables
+  updates.variables = resolvedVars as Layer['variables'];
+
   // Recursively process children, but SKIP collection layers
   // Collection layers will be processed by resolveCollectionLayers with their own item data
   if (layer.children) {
@@ -1167,7 +1153,7 @@ async function injectCollectionData(
         if (child.variables?.collection?.id) {
           return Promise.resolve(child);
         }
-        return injectCollectionData(child, enhancedValues, fields, isPublished, layerDataMap);
+        return injectCollectionData(child, enhancedValues, fields, isPublished, layerDataMap, rawItemValues, timezone);
       })
     );
     updates.children = resolvedChildren;
@@ -1185,7 +1171,8 @@ async function injectCollectionData(
  */
 function resolveInlineVariablesWithRelationships(
   text: string,
-  collectionItem: CollectionItemWithValues
+  collectionItem: CollectionItemWithValues,
+  timezone: string = 'UTC'
 ): string {
   if (!collectionItem || !collectionItem.values) {
     return text;
@@ -1201,14 +1188,14 @@ function resolveInlineVariablesWithRelationships(
         const relationships = parsed.data.relationships || [];
 
         // Build the full path for relationship resolution
-        if (relationships.length > 0) {
-          const fullPath = [fieldId, ...relationships].join('.');
-          const fieldValue = collectionItem.values[fullPath];
-          return fieldValue || '';
-        }
+        const fullPath = relationships.length > 0
+          ? [fieldId, ...relationships].join('.')
+          : fieldId;
 
-        // Simple field lookup
-        const fieldValue = collectionItem.values[fieldId];
+        const fieldValue = collectionItem.values[fullPath];
+        if (parsed.data.format && fieldValue) {
+          return formatFieldValue(fieldValue, parsed.data.field_type, timezone, parsed.data.format);
+        }
         return fieldValue || '';
       }
     } catch {
@@ -1271,11 +1258,14 @@ function hasBlockElementsInInlineVariables(
  * Traverses the content tree and replaces variable nodes with resolved text
  * For rich_text fields, inline the nested Tiptap content
  * @param layerDataMap - Optional map of layer ID → item data for layer-specific resolution
+ * @param rawItemValues - Unformatted values (ISO dates) for applying custom format presets
  */
 function resolveRichTextVariables(
   content: any,
   itemValues: Record<string, string>,
-  layerDataMap?: Record<string, Record<string, string>>
+  layerDataMap?: Record<string, Record<string, string>>,
+  rawItemValues?: Record<string, string>,
+  timezone: string = 'UTC'
 ): any {
   if (!content || typeof content !== 'object') {
     return content;
@@ -1306,7 +1296,7 @@ function resolveRichTextVariables(
       // Handle rich_text fields - preserve block structure for proper rendering
       if (fieldType === 'rich_text' && isTiptapDoc(value)) {
         const resolvedBlocks = value.content.map((block: any) =>
-          resolveRichTextVariables(block, itemValues, layerDataMap)
+          resolveRichTextVariables(block, itemValues, layerDataMap, rawItemValues, timezone)
         );
         return resolvedBlocks.flat();
       }
@@ -1320,10 +1310,20 @@ function resolveRichTextVariables(
         };
       }
 
-      // For other field types, convert to string
-      const textValue = value != null ? String(value) : '';
+      // Apply custom format using raw (unformatted) values when available
+      // Date values in itemValues are pre-formatted by formatDateFieldsInItemValues,
+      // so custom format presets need the original ISO string from rawItemValues
+      const format = variable.data.format;
+      let textValue: string;
+      if (format && rawItemValues) {
+        const rawValue = rawItemValues[fullPath];
+        textValue = rawValue != null
+          ? formatFieldValue(rawValue, fieldType, timezone, format)
+          : (value != null ? String(value) : '');
+      } else {
+        textValue = value != null ? String(value) : '';
+      }
 
-      // Replace variable node with text node, preserving marks (bold, italic, etc.)
       return {
         type: 'text',
         text: textValue,
@@ -1337,7 +1337,7 @@ function resolveRichTextVariables(
   if (Array.isArray(content)) {
     // Flatten arrays that may contain nested arrays from rich_text expansion
     return content.flatMap(node => {
-      const resolved = resolveRichTextVariables(node, itemValues, layerDataMap);
+      const resolved = resolveRichTextVariables(node, itemValues, layerDataMap, rawItemValues, timezone);
       return Array.isArray(resolved) ? resolved : [resolved];
     });
   }
@@ -1348,11 +1348,11 @@ function resolveRichTextVariables(
     if (key === 'content' && Array.isArray(content[key])) {
       // Flatten the content array in case of expanded rich_text nodes
       result[key] = content[key].flatMap((node: any) => {
-        const resolved = resolveRichTextVariables(node, itemValues, layerDataMap);
+        const resolved = resolveRichTextVariables(node, itemValues, layerDataMap, rawItemValues, timezone);
         return Array.isArray(resolved) ? resolved : [resolved];
       });
     } else if (typeof content[key] === 'object' && content[key] !== null) {
-      result[key] = resolveRichTextVariables(content[key], itemValues, layerDataMap);
+      result[key] = resolveRichTextVariables(content[key], itemValues, layerDataMap, rawItemValues, timezone);
     } else {
       result[key] = content[key];
     }
@@ -1643,7 +1643,7 @@ export async function resolveCollectionLayers(
                 // Inject virtual field data into the resolved children
                 const injectedChildren = await Promise.all(
                   resolvedChildren.map(child =>
-                    injectCollectionData(child, virtualValues, undefined, isPublished, updatedLayerDataMap)
+                    injectCollectionData(child, virtualValues, undefined, isPublished, updatedLayerDataMap, undefined, timezone)
                   )
                 );
 
@@ -1818,12 +1818,16 @@ export async function resolveCollectionLayers(
             sortedItems.map(async (item) => {
               // Apply CMS translations to item values before using them
               let translatedValues = applyCmsTranslations(item.id, item.values, collectionFields, translations);
+              // Preserve raw values before date formatting for custom format presets
+              const rawTranslatedValues = { ...translatedValues };
               // Format date fields in user's timezone
               translatedValues = formatDateFieldsInItemValues(translatedValues, collectionFields, timezone);
 
               // Resolve reference fields BEFORE building layerDataMap
               // This ensures relationship paths (e.g., "refFieldId.targetFieldId") are available
               const enhancedValues = await resolveReferenceFields(translatedValues, collectionFields, isPublished);
+              // Overlay raw values on enhanced to preserve relationship paths while keeping unformatted dates
+              const rawEnhancedValues = { ...enhancedValues, ...rawTranslatedValues };
 
               // Extract slug for URL building
               const itemSlug = slugField ? (enhancedValues[slugField.id] || item.values[slugField.id]) : undefined;
@@ -1845,7 +1849,7 @@ export async function resolveCollectionLayers(
               // Then inject field data into the resolved children
               const injectedChildren = await Promise.all(
                 resolvedChildren.map(child =>
-                  injectCollectionData(child, enhancedValues, collectionFields, isPublished, updatedLayerDataMap)
+                  injectCollectionData(child, enhancedValues, collectionFields, isPublished, updatedLayerDataMap, rawEnhancedValues, timezone)
                 )
               );
 
@@ -2554,6 +2558,7 @@ export async function renderCollectionItemsToHtml(
   const renderedItems = await Promise.all(
     items.map(async (item, index) => {
       // Format date fields in user's timezone
+      const rawValues = { ...item.values };
       const formattedValues = formatDateFieldsInItemValues(item.values, collectionFields, htmlTimezone);
 
       // Deep clone the template for each item
@@ -2562,7 +2567,7 @@ export async function renderCollectionItemsToHtml(
       // Inject collection data into each layer of the template (text, images, etc.)
       const injectedLayers = await Promise.all(
         clonedTemplate.map((layer: Layer) =>
-          injectCollectionDataForHtml(layer, formattedValues, collectionFields, isPublished)
+          injectCollectionDataForHtml(layer, formattedValues, collectionFields, isPublished, rawValues, htmlTimezone)
         )
       );
 
@@ -2643,7 +2648,9 @@ async function injectCollectionDataForHtml(
   layer: Layer,
   itemValues: Record<string, string>,
   fields: CollectionField[],
-  isPublished: boolean
+  isPublished: boolean,
+  rawItemValues?: Record<string, string>,
+  timezone: string = 'UTC'
 ): Promise<Layer> {
   // Resolve reference fields if we have field definitions
   let enhancedValues = itemValues;
@@ -2652,6 +2659,7 @@ async function injectCollectionDataForHtml(
   }
 
   const updates: Partial<Layer> = {};
+  const resolvedVars: Record<string, unknown> = { ...layer.variables };
 
   // Resolve inline variables in text content
   const textVariable = layer.variables?.text;
@@ -2670,13 +2678,10 @@ async function injectCollectionDataForHtml(
         };
       }
 
-      const resolvedContent = resolveRichTextVariables(content, enhancedValues);
-      updates.variables = {
-        ...layer.variables,
-        text: {
-          type: 'dynamic_rich_text',
-          data: { content: resolvedContent }
-        }
+      const resolvedContent = resolveRichTextVariables(content, enhancedValues, undefined, rawItemValues, timezone);
+      resolvedVars.text = {
+        type: 'dynamic_rich_text',
+        data: { content: resolvedContent },
       };
     }
   }
@@ -2696,13 +2701,10 @@ async function injectCollectionDataForHtml(
         content_hash: null,
         values: enhancedValues,
       };
-      const resolved = resolveInlineVariables(textContent, mockItem);
-      updates.variables = {
-        ...layer.variables,
-        text: {
-          type: 'dynamic_text',
-          data: { content: resolved }
-        }
+      const resolved = resolveInlineVariables(textContent, mockItem, timezone);
+      resolvedVars.text = {
+        type: 'dynamic_text',
+        data: { content: resolved },
       };
     }
   }
@@ -2721,13 +2723,9 @@ async function injectCollectionDataForHtml(
   const imageSrc = layer.variables?.image?.src;
   if (imageSrc && isFieldVariable(imageSrc) && imageSrc.data.field_id) {
     const resolvedValue = resolveFieldPath(imageSrc);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      image: {
-        src: createResolvedAssetVariable(imageSrc.data.field_id, resolvedValue, imageSrc),
-        alt: layer.variables?.image?.alt || createDynamicTextVariable(''),
-      },
+    resolvedVars.image = {
+      src: createResolvedAssetVariable(imageSrc.data.field_id, resolvedValue, imageSrc),
+      alt: layer.variables?.image?.alt || createDynamicTextVariable(''),
     };
   }
 
@@ -2735,13 +2733,9 @@ async function injectCollectionDataForHtml(
   const videoSrc = layer.variables?.video?.src;
   if (videoSrc && isFieldVariable(videoSrc) && videoSrc.data.field_id) {
     const resolvedValue = resolveFieldPath(videoSrc);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      video: {
-        ...layer.variables?.video,
-        src: createResolvedAssetVariable(videoSrc.data.field_id, resolvedValue, videoSrc),
-      },
+    resolvedVars.video = {
+      ...layer.variables?.video,
+      src: createResolvedAssetVariable(videoSrc.data.field_id, resolvedValue, videoSrc),
     };
   }
 
@@ -2749,13 +2743,9 @@ async function injectCollectionDataForHtml(
   const audioSrc = layer.variables?.audio?.src;
   if (audioSrc && isFieldVariable(audioSrc) && audioSrc.data.field_id) {
     const resolvedValue = resolveFieldPath(audioSrc);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      audio: {
-        ...layer.variables?.audio,
-        src: createResolvedAssetVariable(audioSrc.data.field_id, resolvedValue, audioSrc),
-      },
+    resolvedVars.audio = {
+      ...layer.variables?.audio,
+      src: createResolvedAssetVariable(audioSrc.data.field_id, resolvedValue, audioSrc),
     };
   }
 
@@ -2763,12 +2753,8 @@ async function injectCollectionDataForHtml(
   const bgImageSrc = layer.variables?.backgroundImage?.src;
   if (bgImageSrc && isFieldVariable(bgImageSrc) && bgImageSrc.data.field_id) {
     const resolvedValue = resolveFieldPath(bgImageSrc);
-    updates.variables = {
-      ...updates.variables,
-      ...layer.variables,
-      backgroundImage: {
-        src: createResolvedAssetVariable(bgImageSrc.data.field_id, resolvedValue, bgImageSrc),
-      },
+    resolvedVars.backgroundImage = {
+      src: createResolvedAssetVariable(bgImageSrc.data.field_id, resolvedValue, bgImageSrc),
     };
   }
 
@@ -2783,11 +2769,14 @@ async function injectCollectionDataForHtml(
     }
   }
 
+  // Assign all resolved variables
+  updates.variables = resolvedVars as Layer['variables'];
+
   // Recursively process children
   if (layer.children) {
     const resolvedChildren = await Promise.all(
       layer.children.map(child =>
-        injectCollectionDataForHtml(child, enhancedValues, fields, isPublished)
+        injectCollectionDataForHtml(child, enhancedValues, fields, isPublished, rawItemValues, timezone)
       )
     );
     updates.children = resolvedChildren;
@@ -3171,13 +3160,27 @@ function renderTiptapToHtml(
     return '<br>';
   }
 
-  // Handle rich-text images
+  // Handle rich-text images (optionally wrapped in a link)
   if (content.type === 'richTextImage') {
     const src = content.attrs?.src ? escapeHtml(content.attrs.src) : '';
     const alt = content.attrs?.alt ? escapeHtml(content.attrs.alt) : '';
     const imgClass = textStyles?.richTextImage?.classes || '';
     const classAttr = imgClass ? ` class="${escapeHtml(imgClass)}"` : '';
-    return `<img src="${src}" alt="${alt}"${classAttr} />`;
+    const imgTag = `<img src="${src}" alt="${alt}"${classAttr} />`;
+
+    const storedLink = content.attrs?.link as LinkSettings | null;
+    if (storedLink?.type && linkContext) {
+      const resolvedHref = generateLinkHref(storedLink, linkContext);
+      if (resolvedHref) {
+        const href = escapeHtml(resolvedHref);
+        const target = storedLink.target ? ` target="${escapeHtml(storedLink.target)}"` : '';
+        const rel = storedLink.target === '_blank' ? ' rel="noopener noreferrer"' : '';
+        const download = storedLink.download ? ' download' : '';
+        return `<a href="${href}"${target}${rel}${download}>${imgTag}</a>`;
+      }
+    }
+
+    return imgTag;
   }
 
   // Handle embedded component blocks

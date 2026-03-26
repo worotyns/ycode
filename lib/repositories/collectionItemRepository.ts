@@ -102,6 +102,7 @@ export interface CreateCollectionItemData {
   manual_order?: number;
   is_published?: boolean;
   is_publishable?: boolean;
+  content_hash?: string;
 }
 
 export interface UpdateCollectionItemData {
@@ -278,14 +279,24 @@ export async function enrichItemsWithStatus(
   const itemIds = items.map(item => item.id);
 
   // Fetch published counterparts (id + content_hash) in one query
-  const { data: publishedRows, error } = await client
-    .from('collection_items')
-    .select('id, content_hash')
-    .in('id', itemIds)
-    .eq('is_published', true)
-    .is('deleted_at', null);
+  let publishedRows: Array<{ id: string; content_hash: string | null }> | null = null;
+  try {
+    const { data, error } = await client
+      .from('collection_items')
+      .select('id, content_hash')
+      .in('id', itemIds)
+      .eq('is_published', true)
+      .is('deleted_at', null);
 
-  if (error) throw new Error(`Failed to fetch published items for status: ${error.message}`);
+    if (error) {
+      console.error('Failed to fetch published items for status:', error.message);
+    } else {
+      publishedRows = data;
+    }
+  } catch (err) {
+    // Transient network errors should not break the items endpoint
+    console.error('Network error fetching published items for status:', err);
+  }
 
   const publishedHashMap = new Map<string, string | null>(
     (publishedRows || []).map(row => [row.id, row.content_hash])
@@ -641,6 +652,33 @@ export async function getTopItemsWithValuesPerCollection(
 }
 
 /**
+ * Get the highest manual_order value for items in a collection.
+ */
+export async function getMaxManualOrder(
+  collectionId: string,
+  isPublished: boolean = false
+): Promise<number> {
+  const client = await getSupabaseAdmin();
+
+  if (!client) {
+    throw new Error('Supabase client not configured');
+  }
+
+  const { data, error } = await client
+    .from('collection_items')
+    .select('manual_order')
+    .eq('collection_id', collectionId)
+    .eq('is_published', isPublished)
+    .is('deleted_at', null)
+    .order('manual_order', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) return -1;
+  return data.manual_order ?? -1;
+}
+
+/**
  * Get the maximum ID value for the ID field in a collection
  * @param collection_id - Collection UUID
  * @param is_published - Filter for draft (false) or published (true) values. Defaults to false (draft).
@@ -710,6 +748,7 @@ export async function createItemsBulk(
     manual_order: item.manual_order ?? 0,
     is_published: item.is_published ?? false,
     is_publishable: item.is_publishable ?? true,
+    content_hash: item.content_hash ?? null,
     created_at: now,
     updated_at: now,
   }));

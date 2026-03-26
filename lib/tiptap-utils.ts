@@ -188,7 +188,7 @@ export function hasLinkOrComponent(node: any): boolean {
 }
 
 /** Extract the first CMS field binding from Tiptap JSON content (dynamicVariable node with type 'field'). */
-export function getCmsFieldBinding(node: any): { field_id: string; label?: string; source?: 'page' | 'collection'; collection_layer_id?: string; field_type?: string | null } | null {
+export function getCmsFieldBinding(node: any): { field_id: string; label?: string; source?: 'page' | 'collection'; collection_layer_id?: string; field_type?: string | null; format?: string } | null {
   if (!node || typeof node !== 'object') return null;
   if (node.type === 'dynamicVariable') {
     const variable = node.attrs?.variable;
@@ -199,6 +199,7 @@ export function getCmsFieldBinding(node: any): { field_id: string; label?: strin
         source: variable.data.source,
         collection_layer_id: variable.data.collection_layer_id,
         field_type: variable.data.field_type ?? null,
+        format: variable.data.format,
       };
     }
   }

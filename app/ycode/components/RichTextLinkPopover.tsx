@@ -63,84 +63,91 @@ export default function RichTextLinkPopover({
   excludedLinkTypes = [],
   hidePageContextOptions = false,
 }: RichTextLinkPopoverProps) {
-  // Use controlled state if provided, otherwise internal state
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
 
-  // Link settings state
   const [linkSettings, setLinkSettings] = useState<LinkSettings | null>(null);
 
-  // Save selection range and hasLink state when popover opens
   const [savedSelection, setSavedSelection] = useState<{ from: number; to: number } | null>(null);
   const [hadLinkOnOpen, setHadLinkOnOpen] = useState(false);
+  // When editing a link on a richTextImage node, store its position
+  const [imageNodePos, setImageNodePos] = useState<number | null>(null);
 
-  // Check if text has link mark (for display only)
   const hasLink = editor.isActive('richTextLink');
 
-  // Custom open change handler that captures selection before opening
   const handleOpenChange = useCallback((newOpen: boolean) => {
-    // Prevent opening if disabled
     if (newOpen && disabled) {
       return;
     }
 
     if (newOpen) {
-      // Capture selection and link state BEFORE opening
       let { from, to } = editor.state.selection;
 
-      const currentHasLink = editor.isActive('richTextLink');
-      setHadLinkOnOpen(currentHasLink);
+      // Check if the selection is on an image node
+      const nodeAtSelection = editor.state.doc.nodeAt(from);
+      if (nodeAtSelection?.type.name === 'richTextImage') {
+        setImageNodePos(from);
+        setSavedSelection({ from, to });
 
-      // If cursor is on a link but no text is selected, extend to full mark range
-      if (currentHasLink && from === to) {
-        const markType = editor.schema.marks.richTextLink;
-        if (markType) {
-          const $pos = editor.state.doc.resolve(from);
-          const start = $pos.parent.childAfter($pos.parentOffset);
+        const storedLink = nodeAtSelection.attrs.link as LinkSettings | null;
+        if (storedLink) {
+          setLinkSettings(storedLink);
+          setHadLinkOnOpen(true);
+        } else {
+          setLinkSettings(null);
+          setHadLinkOnOpen(false);
+        }
+      } else {
+        setImageNodePos(null);
+        const currentHasLink = editor.isActive('richTextLink');
+        setHadLinkOnOpen(currentHasLink);
 
-          if (start.node) {
-            // Find the mark on the current node
-            const mark = start.node.marks.find(m => m.type === markType);
-            if (mark) {
-              // Calculate mark boundaries within the parent
-              let markStart = $pos.start();
-              let markEnd = $pos.start();
-              let foundStart = false;
+        // If cursor is on a link but no text is selected, extend to full mark range
+        if (currentHasLink && from === to) {
+          const markType = editor.schema.marks.richTextLink;
+          if (markType) {
+            const $pos = editor.state.doc.resolve(from);
+            const start = $pos.parent.childAfter($pos.parentOffset);
 
-              $pos.parent.forEach((node, offset) => {
-                const hasMark = node.marks.some(m => m.type === markType && m.eq(mark));
-                if (hasMark) {
-                  if (!foundStart) {
-                    markStart = $pos.start() + offset;
-                    foundStart = true;
+            if (start.node) {
+              const mark = start.node.marks.find(m => m.type === markType);
+              if (mark) {
+                let markStart = $pos.start();
+                let markEnd = $pos.start();
+                let foundStart = false;
+
+                $pos.parent.forEach((node, offset) => {
+                  const hasMark = node.marks.some(m => m.type === markType && m.eq(mark));
+                  if (hasMark) {
+                    if (!foundStart) {
+                      markStart = $pos.start() + offset;
+                      foundStart = true;
+                    }
+                    markEnd = $pos.start() + offset + node.nodeSize;
+                  } else if (foundStart) {
+                    return false;
                   }
-                  markEnd = $pos.start() + offset + node.nodeSize;
-                } else if (foundStart) {
-                  // We've passed the mark range
-                  return false;
-                }
-              });
+                });
 
-              from = markStart;
-              to = markEnd;
+                from = markStart;
+                to = markEnd;
+              }
             }
           }
         }
-      }
 
-      setSavedSelection({ from, to });
+        setSavedSelection({ from, to });
 
-      if (currentHasLink) {
-        // Get current link attributes from selection
-        const attrs = editor.getAttributes('richTextLink');
-        setLinkSettings(getLinkSettingsFromMark(attrs));
-      } else {
-        setLinkSettings(null);
+        if (currentHasLink) {
+          const attrs = editor.getAttributes('richTextLink');
+          setLinkSettings(getLinkSettingsFromMark(attrs));
+        } else {
+          setLinkSettings(null);
+        }
       }
     }
 
-    // Update the open state
     if (isControlled) {
       controlledOnOpenChange!(newOpen);
     } else {
@@ -148,7 +155,6 @@ export default function RichTextLinkPopover({
     }
   }, [editor, isControlled, controlledOnOpenChange, disabled]);
 
-  // For closing without going through handleOpenChange
   const closePopover = useCallback(() => {
     if (isControlled) {
       controlledOnOpenChange!(false);
@@ -157,8 +163,20 @@ export default function RichTextLinkPopover({
     }
   }, [isControlled, controlledOnOpenChange]);
 
-  // Apply link settings to the editor immediately
-  const applyToEditor = useCallback((settings: LinkSettings | null, selection: { from: number; to: number } | null) => {
+  /** Write full LinkSettings to image node's `link` attribute. */
+  const applyToImageNode = useCallback((pos: number, settings: LinkSettings | null) => {
+    const node = editor.state.doc.nodeAt(pos);
+    if (node?.type.name !== 'richTextImage') return;
+
+    const tr = editor.state.tr.setNodeMarkup(pos, undefined, {
+      ...node.attrs,
+      link: settings,
+    });
+    editor.view.dispatch(tr);
+  }, [editor]);
+
+  /** Apply link settings to a text selection via marks. */
+  const applyToTextSelection = useCallback((settings: LinkSettings | null, selection: { from: number; to: number } | null) => {
     if (!selection) return;
 
     const { from, to } = selection;
@@ -177,18 +195,26 @@ export default function RichTextLinkPopover({
     const { state } = editor;
     const tr = state.tr;
     tr.removeMark(from, to, markType);
-    tr.addMark(from, to, markType.create(settings as any));
+    tr.addMark(from, to, markType.create(settings as unknown as Record<string, unknown>));
     editor.view.dispatch(tr);
   }, [editor]);
 
-  // Handle settings change — apply immediately
   const handleSettingsChange = useCallback((settings: LinkSettings | null) => {
     setLinkSettings(settings);
-    applyToEditor(settings, savedSelection);
-  }, [applyToEditor, savedSelection]);
+    if (imageNodePos !== null) {
+      applyToImageNode(imageNodePos, settings);
+    } else {
+      applyToTextSelection(settings, savedSelection);
+    }
+  }, [imageNodePos, applyToImageNode, applyToTextSelection, savedSelection]);
 
-  // Remove link from selection
   const handleRemove = useCallback(() => {
+    if (imageNodePos !== null) {
+      applyToImageNode(imageNodePos, null);
+      closePopover();
+      return;
+    }
+
     if (!savedSelection) {
       editor.chain().focus().unsetRichTextLink().run();
       closePopover();
@@ -202,7 +228,7 @@ export default function RichTextLinkPopover({
       .unsetRichTextLink()
       .run();
     closePopover();
-  }, [editor, savedSelection, closePopover]);
+  }, [editor, imageNodePos, savedSelection, closePopover, applyToImageNode]);
 
   // Default trigger button
   const defaultTrigger = (

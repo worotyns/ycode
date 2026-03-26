@@ -272,6 +272,40 @@ export async function getAssetsByIds(ids: string[], isPublished: boolean = false
 }
 
 /**
+ * Batch-find draft assets by filenames. Returns a map of filename → asset.
+ * Used for CSV import dedup to avoid N+1 queries.
+ */
+export async function findAssetsByFilenames(filenames: string[]): Promise<Record<string, Pick<Asset, 'id' | 'public_url'>>> {
+  if (filenames.length === 0) return {};
+
+  const client = await getSupabaseAdmin();
+
+  if (!client) {
+    throw new Error('Supabase not configured');
+  }
+
+  const unique = [...new Set(filenames)];
+  const { data, error } = await client
+    .from('assets')
+    .select('id, filename, public_url')
+    .in('filename', unique)
+    .eq('is_published', false)
+    .is('deleted_at', null);
+
+  if (error || !data?.length) {
+    return {};
+  }
+
+  const map: Record<string, Pick<Asset, 'id' | 'public_url'>> = {};
+  for (const asset of data) {
+    if (!map[asset.filename]) {
+      map[asset.filename] = { id: asset.id, public_url: asset.public_url };
+    }
+  }
+  return map;
+}
+
+/**
  * Create asset record (always creates as draft)
  */
 export async function createAsset(assetData: CreateAssetData): Promise<Asset> {

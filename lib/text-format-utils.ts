@@ -243,6 +243,33 @@ export function getTiptapTextContent(text: string): {
 }
 
 /**
+ * Resolve the link href for a richTextImage node.
+ * Reads from the `link` attribute (full LinkSettings) first, falling back to legacy `href`.
+ * In edit mode, uses '#' placeholder to avoid expensive link resolution.
+ */
+function resolveImageLinkHref(
+  attrs: Record<string, unknown> | undefined,
+  isEditMode: boolean,
+  linkContext?: RichTextLinkContext,
+  collectionItemData?: Record<string, string>,
+  pageCollectionItemData?: Record<string, string>,
+): string | null {
+  if (!attrs) return null;
+
+  const storedLink = attrs.link as LinkSettings | null;
+  if (!storedLink?.type) return null;
+
+  if (isEditMode) return '#';
+
+  const fullContext: LinkResolutionContext = {
+    ...linkContext,
+    collectionItemData,
+    pageCollectionItemData,
+  };
+  return generateLinkHref(storedLink, fullContext) || null;
+}
+
+/**
  * Flatten multi-paragraph Tiptap content into a single paragraph with hardBreak nodes.
  * Used for heading/text elements that should not contain nested block elements.
  * Converts: [paragraph("a"), paragraph("b")] → [paragraph("a", hardBreak, "b")]
@@ -278,17 +305,16 @@ function getVariableNodeData(
   collectionItemData?: Record<string, string>,
   pageCollectionItemData?: Record<string, string>,
   layerDataMap?: Record<string, Record<string, string>>
-): { fieldType: string | null; rawValue: unknown } {
+): { fieldType: string | null; rawValue: unknown; format?: string } {
   if (node.attrs?.variable?.type === 'field' && node.attrs.variable.data?.field_id) {
-    const { field_id, field_type, relationships = [], source, collection_layer_id } = node.attrs.variable.data;
+    const { field_id, field_type, relationships = [], source, collection_layer_id, format } = node.attrs.variable.data;
 
-    // Build the full path for relationship resolution
     const fieldPath = relationships.length > 0
       ? [field_id, ...relationships].join('.')
       : field_id;
 
     const rawValue = resolveFieldFromSources(fieldPath, source, collectionItemData, pageCollectionItemData, collection_layer_id, layerDataMap);
-    return { fieldType: field_type || null, rawValue };
+    return { fieldType: field_type || null, rawValue, format };
   }
 
   return { fieldType: null, rawValue: undefined };
@@ -307,8 +333,8 @@ function resolveVariableNode(
   pageCollectionItemData?: Record<string, string>,
   timezone: string = 'UTC'
 ): string {
-  const { fieldType, rawValue } = getVariableNodeData(node, collectionItemData, pageCollectionItemData);
-  return formatFieldValue(rawValue, fieldType, timezone);
+  const { fieldType, rawValue, format } = getVariableNodeData(node, collectionItemData, pageCollectionItemData);
+  return formatFieldValue(rawValue, fieldType, timezone, format);
 }
 
 /**
@@ -511,17 +537,15 @@ function renderInlineContent(
     }
 
     if (node.type === 'dynamicVariable') {
-      const { fieldType, rawValue } = getVariableNodeData(node, collectionItemData, pageCollectionItemData, layerDataMap);
+      const { fieldType, rawValue, format } = getVariableNodeData(node, collectionItemData, pageCollectionItemData, layerDataMap);
 
       // Handle rich_text fields - render nested Tiptap content
       if (fieldType === 'rich_text' && rawValue) {
-        // Parse JSON string if needed (published pages store as string)
         let richTextValue: unknown = rawValue;
         if (typeof rawValue === 'string') {
           try {
             richTextValue = JSON.parse(rawValue);
           } catch {
-            // If parsing fails, fall through to text rendering
             richTextValue = null;
           }
         }
@@ -544,8 +568,8 @@ function renderInlineContent(
         }
       }
 
-      // For other field types, render as text
-      const value = formatFieldValue(rawValue, fieldType, timezone);
+      // For other field types, render as text with optional format
+      const value = formatFieldValue(rawValue, fieldType, timezone, format);
       const textNode = {
         type: 'text',
         text: value,
@@ -571,7 +595,20 @@ function renderInlineContent(
       if (node.attrs?.assetId) {
         imgProps['data-asset-id'] = node.attrs.assetId;
       }
-      return [React.createElement('img', imgProps)];
+      const imgEl = React.createElement('img', imgProps);
+
+      const imgLinkHref = resolveImageLinkHref(node.attrs, isEditMode, linkContext, collectionItemData, pageCollectionItemData);
+      if (imgLinkHref) {
+        const imgTarget = node.attrs?.link?.target || undefined;
+        return [React.createElement('a', {
+          key,
+          href: imgLinkHref,
+          target: imgTarget,
+          rel: imgTarget === '_blank' ? 'noopener noreferrer' : undefined,
+        }, imgEl)];
+      }
+
+      return [imgEl];
     }
 
     if (node.type === 'hardBreak') {
@@ -788,7 +825,20 @@ function renderBlock(
     if (block.attrs?.assetId) {
       imgProps['data-asset-id'] = block.attrs.assetId;
     }
-    return React.createElement('img', imgProps);
+    const imgElement = React.createElement('img', imgProps);
+
+    const imgLinkHref = resolveImageLinkHref(block.attrs, isEditMode, linkContext, collectionItemData, pageCollectionItemData);
+    if (imgLinkHref) {
+      const imgTarget = block.attrs?.link?.target || undefined;
+      return React.createElement('a', {
+        key,
+        href: imgLinkHref,
+        target: imgTarget,
+        rel: imgTarget === '_blank' ? 'noopener noreferrer' : undefined,
+      }, imgElement);
+    }
+
+    return imgElement;
   }
 
   if (block.type === 'horizontalRule') {

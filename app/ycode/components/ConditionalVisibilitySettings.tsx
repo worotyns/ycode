@@ -47,6 +47,7 @@ import {
   flattenFieldGroups,
   COMPARE_OPERATORS,
   PAGE_COLLECTION_OPERATORS,
+  isDateFieldType,
 } from '@/lib/collection-field-utils';
 import { findAllCollectionLayers, CollectionLayerInfo } from '@/lib/layer-utils';
 import { usePagesStore } from '@/stores/usePagesStore';
@@ -654,7 +655,7 @@ export default function ConditionalVisibilitySettings({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              ) : fieldType === 'date' ? (
+              ) : isDateFieldType(fieldType) ? (
                 <Input
                   type="date"
                   value={condition.value || ''}

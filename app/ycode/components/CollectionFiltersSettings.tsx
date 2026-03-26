@@ -47,6 +47,7 @@ import {
   findDisplayField,
   getItemDisplayName,
   COMPARE_OPERATORS,
+  isDateFieldType,
 } from '@/lib/collection-field-utils';
 import { getCollectionVariable, isInputInsideFilter, findLayerById } from '@/lib/layer-utils';
 import { useEditorStore } from '@/stores/useEditorStore';
@@ -665,7 +666,7 @@ export default function CollectionFiltersSettings({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
-                    ) : fieldType === 'date' ? (
+                    ) : isDateFieldType(fieldType) ? (
                       <Input
                         type="date"
                         value={condition.value || ''}

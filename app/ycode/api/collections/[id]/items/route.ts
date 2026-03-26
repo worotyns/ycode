@@ -4,9 +4,11 @@ import { getCollectionById } from '@/lib/repositories/collectionRepository';
 import { clearAllCache } from '@/lib/services/cacheService';
 import { setValuesByFieldName } from '@/lib/repositories/collectionItemValueRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
-import { findStatusFieldId } from '@/lib/collection-field-utils';
+import { getAssetsByIds } from '@/lib/repositories/assetRepository';
+import { findStatusFieldId, isAssetFieldType, isMultipleAssetField } from '@/lib/collection-field-utils';
 import type { StatusAction } from '@/lib/collection-field-utils';
 import { noCache } from '@/lib/api-response';
+import type { CollectionItemWithValues, CollectionField } from '@/types';
 
 // Disable caching for this route
 export const dynamic = 'force-dynamic';
@@ -22,6 +24,7 @@ export const revalidate = 0;
  *  - sortBy: string (optional) - Field ID to sort by, or 'manual', 'random', 'none'
  *  - sortOrder: 'asc' | 'desc' (optional, default: 'asc') - Sort order
  *  - offset: number (optional) - Number of items to skip
+ *  - includeAssets: 'true' (optional) - Include referenced assets in the response
  */
 export async function GET(
   request: NextRequest,
@@ -39,6 +42,7 @@ export async function GET(
     const sortOrder = (searchParams.get('sortOrder') || 'asc') as 'asc' | 'desc';
     const offsetParam = searchParams.get('offset');
     const filtersParam = searchParams.get('filters');
+    const includeAssets = searchParams.get('includeAssets') === 'true';
 
     // Calculate offset (use explicit offset if provided, otherwise calculate from page)
     const offset = offsetParam ? parseInt(offsetParam, 10) : (page - 1) * limit;
@@ -146,14 +150,18 @@ export async function GET(
       items = items.slice(offset, offset + limit);
     }
 
-    return noCache({
-      data: {
-        items,
-        total,
-        page,
-        limit,
+    // Optionally resolve referenced assets for the returned items
+    const responseData: Record<string, unknown> = { items, total, page, limit };
+
+    if (includeAssets) {
+      const assetIds = extractAssetIdsFromItems(items, allFields);
+      if (assetIds.length > 0) {
+        const assetsMap = await getAssetsByIds(assetIds, false);
+        responseData.referencedAssets = Object.values(assetsMap);
       }
-    });
+    }
+
+    return noCache({ data: responseData });
   } catch (error) {
     console.error('Error fetching collection items:', error);
     return noCache(
@@ -161,6 +169,39 @@ export async function GET(
       500
     );
   }
+}
+
+/** Extract unique asset IDs from item values based on asset-type fields. */
+function extractAssetIdsFromItems(
+  items: CollectionItemWithValues[],
+  fields: CollectionField[],
+): string[] {
+  const assetFieldIds = fields.filter(f => isAssetFieldType(f.type)).map(f => f.id);
+  const multiAssetFieldIds = new Set(
+    fields.filter(f => isMultipleAssetField(f)).map(f => f.id),
+  );
+
+  if (assetFieldIds.length === 0) return [];
+
+  const ids = new Set<string>();
+
+  for (const item of items) {
+    for (const fieldId of assetFieldIds) {
+      const value = item.values[fieldId];
+      if (!value) continue;
+
+      if (multiAssetFieldIds.has(fieldId)) {
+        const arr = Array.isArray(value) ? value : [];
+        for (const v of arr) {
+          if (typeof v === 'string' && v) ids.add(v);
+        }
+      } else if (typeof value === 'string') {
+        ids.add(value);
+      }
+    }
+  }
+
+  return Array.from(ids);
 }
 
 /**

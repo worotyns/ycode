@@ -6,19 +6,24 @@
  */
 
 import type { CollectionField, InlineVariable } from '@/types';
+import { isDateFieldType } from '@/lib/collection-field-utils';
 import { formatDateInTimezone } from '@/lib/date-format-utils';
 import { extractPlainTextFromTiptap } from '@/lib/tiptap-utils';
+import { formatDateWithPreset, formatNumberWithPreset } from '@/lib/variable-format-utils';
 
 /**
  * Format a field value for display based on field type
- * - date: formats in user's timezone
+ * - date: formats in user's timezone (with optional format preset)
+ * - number: formats with optional number preset
  * - rich_text: extracts plain text from Tiptap JSON
  * Returns the original value for other fields
+ * @param format - Optional format preset ID (e.g. 'date-long', 'number-decimal')
  */
 export function formatFieldValue(
   value: unknown,
   fieldType: string | null | undefined,
-  timezone: string = 'UTC'
+  timezone: string = 'UTC',
+  format?: string
 ): string {
   if (value === null || value === undefined) return '';
 
@@ -27,7 +32,6 @@ export function formatFieldValue(
     if (typeof value === 'object') {
       return extractPlainTextFromTiptap(value);
     }
-    // If it's a string (legacy or unparsed), try to parse and extract
     if (typeof value === 'string') {
       try {
         const parsed = JSON.parse(value);
@@ -39,14 +43,24 @@ export function formatFieldValue(
     return '';
   }
 
-  // Handle date fields
-  if (fieldType === 'date' && typeof value === 'string') {
+  // Handle date fields with optional format preset
+  if (isDateFieldType(fieldType) && typeof value === 'string') {
+    if (format) {
+      return formatDateWithPreset(value, format, timezone);
+    }
     return formatDateInTimezone(value, timezone, 'display');
+  }
+
+  // Handle number fields with optional format preset
+  if (fieldType === 'number' && format) {
+    const numValue = typeof value === 'number' ? value : parseFloat(String(value));
+    if (!isNaN(numValue)) {
+      return formatNumberWithPreset(numValue, format);
+    }
   }
 
   // For other fields, ensure we return a string
   if (typeof value === 'object') {
-    // Safety fallback - if an object slips through, stringify it
     return JSON.stringify(value);
   }
 

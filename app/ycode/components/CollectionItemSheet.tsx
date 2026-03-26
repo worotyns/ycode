@@ -46,7 +46,7 @@ import { slugify, normalizeBooleanValue } from '@/lib/collection-utils';
 import { isAssetFieldType, isMultipleAssetField, getFileManagerCategory, getAssetFieldLabel, getAssetFieldTypeLabel, isValidAssetForField, findStatusFieldId } from '@/lib/collection-field-utils';
 import type { StatusAction } from '@/lib/collection-field-utils';
 import { CollectionStatusPill, parseStatusValue } from './CollectionStatusPill';
-import { formatDateInTimezone, localDatetimeToUTC } from '@/lib/date-format-utils';
+import { formatDateInTimezone, localDatetimeToUTC, clampDateInputValue } from '@/lib/date-format-utils';
 import { useSettingsStore } from '@/stores/useSettingsStore';
 import { toast } from 'sonner';
 import ReferenceFieldCombobox from './ReferenceFieldCombobox';
@@ -121,14 +121,14 @@ export default function CollectionItemSheet({
   const currentPage = currentPageId ? pages.find(p => p.id === currentPageId) : null;
   const isPageLevelItem = currentPage?.is_dynamic && currentPage?.settings?.cms?.collection_id === collectionId;
 
-  // Find name and slug fields for validation
+  // Find name and slug fields for validation (only if editable in the form)
   const nameField = useMemo(
-    () => collectionFields.find(f => f.key === 'name'),
+    () => collectionFields.find(f => f.key === 'name' && f.fillable && !f.hidden),
     [collectionFields]
   );
 
   const slugField = useMemo(
-    () => collectionFields.find(f => f.key === 'slug'),
+    () => collectionFields.find(f => f.key === 'slug' && f.fillable && !f.hidden),
     [collectionFields]
   );
 
@@ -623,8 +623,18 @@ export default function CollectionItemSheet({
                               autoComplete="off"
                               value={formatDateInTimezone(formField.value, timezone, 'datetime-local')}
                               onChange={(e) => {
-                                const utcValue = localDatetimeToUTC(e.target.value, timezone);
+                                const clamped = clampDateInputValue(e.target.value);
+                                const utcValue = localDatetimeToUTC(clamped, timezone);
                                 formField.onChange(utcValue);
+                              }}
+                            />
+                          ) : field.type === 'date_only' ? (
+                            <Input
+                              type="date"
+                              autoComplete="off"
+                              value={formField.value?.slice(0, 10) || ''}
+                              onChange={(e) => {
+                                formField.onChange(clampDateInputValue(e.target.value) || '');
                               }}
                             />
                           ) : field.type === 'color' ? (
