@@ -235,7 +235,7 @@ export interface MapSettings {
   longitude: number;
   zoom: number;
   style: MapStyle;
-  showMarker: boolean;
+  markerColor: string | null;
   interactive: boolean;
   scrollZoom: boolean;
   showNavControl: boolean;

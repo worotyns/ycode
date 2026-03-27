@@ -5,7 +5,7 @@
  * Used by LayerRenderer (canvas/published) and page-fetcher (static HTML export).
  */
 
-import type { MapSettings, MapStyle } from '@/types';
+import type { ColorVariable, MapSettings, MapStyle } from '@/types';
 
 const MAPBOX_GL_VERSION = 'v3.20.0';
 const MAPBOX_CDN_BASE = `https://cdn.jsdelivr.net/npm/mapbox-gl@${MAPBOX_GL_VERSION}/dist`;
@@ -31,7 +31,7 @@ export const DEFAULT_MAP_SETTINGS: MapSettings = {
   longitude: -74.005994,
   zoom: 12,
   style: 'streets',
-  showMarker: true,
+  markerColor: '#2e79d6',
   interactive: true,
   scrollZoom: true,
   showNavControl: false,
@@ -44,6 +44,20 @@ export function getMapboxStyleUrl(style: MapStyle): string {
   return STYLE_URLS[style] || STYLE_URLS.streets;
 }
 
+/** Resolve a marker color value, looking up color variables when referenced */
+export function resolveMarkerColor(
+  markerColor: string | null,
+  colorVariables: ColorVariable[],
+): string | null {
+  if (!markerColor) return null;
+  const match = markerColor.match(/^color:var\(--([^)]+)\)$/);
+  if (match) {
+    const variable = colorVariables.find((v) => v.id === match[1]);
+    return variable?.value || null;
+  }
+  return markerColor;
+}
+
 /**
  * Build a self-contained HTML document that renders a Mapbox GL JS map.
  * Loaded via iframe srcdoc in both the editor and published/exported pages.
@@ -54,7 +68,7 @@ export function buildMapEmbedHtml(
 ): string {
   const styleUrl = getMapboxStyleUrl(settings.style);
   const {
-    latitude, longitude, zoom, showMarker, interactive,
+    latitude, longitude, zoom, markerColor, interactive,
     scrollZoom, showNavControl, showScaleBar,
   } = settings;
 
@@ -76,8 +90,8 @@ export function buildMapEmbedHtml(
   if (showNavControl) controls.push('map.addControl(new mapboxgl.NavigationControl());');
   if (showScaleBar) controls.push('map.addControl(new mapboxgl.ScaleControl());');
 
-  const markerScript = showMarker
-    ? `new mapboxgl.Marker().setLngLat([${longitude}, ${latitude}]).addTo(map);`
+  const markerScript = markerColor
+    ? `new mapboxgl.Marker({color:'${markerColor.replace(/'/g, "\\'")}'}).setLngLat([${longitude}, ${latitude}]).addTo(map);`
     : '';
 
   return `<!DOCTYPE html>

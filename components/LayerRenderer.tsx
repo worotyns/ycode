@@ -12,7 +12,7 @@ import type { Layer, Locale, ComponentVariable, FormSettings, LinkSettings, Brea
 import type { UseLiveLayerUpdatesReturn } from '@/hooks/use-live-layer-updates';
 import type { UseLiveComponentUpdatesReturn } from '@/hooks/use-live-component-updates';
 import { getLayerHtmlTag, getClassesString, getText, resolveFieldValue, isTextEditable, isTextContentLayer, isRichTextLayer, getCollectionVariable, evaluateVisibility, findAncestorByName, filterDisabledSliderLayers, getLayerCmsFieldBinding } from '@/lib/layer-utils';
-import { buildMapEmbedHtml, DEFAULT_MAP_SETTINGS } from '@/lib/map-utils';
+import { buildMapEmbedHtml, DEFAULT_MAP_SETTINGS, resolveMarkerColor } from '@/lib/map-utils';
 import { SWIPER_CLASS_MAP, SWIPER_DATA_ATTR_MAP } from '@/lib/templates/utilities';
 import { useCanvasSlider } from '@/hooks/use-canvas-slider';
 import { resolveFieldFromSources } from '@/lib/cms-variables-utils';
@@ -36,6 +36,7 @@ import { useCollectionLayerStore } from '@/stores/useCollectionLayerStore';
 import { useFilterStore } from '@/stores/useFilterStore';
 import { useCollectionsStore } from '@/stores/useCollectionsStore';
 import { useAssetsStore } from '@/stores/useAssetsStore';
+import { useColorVariablesStore } from '@/stores/useColorVariablesStore';
 import { ShimmerSkeleton } from '@/components/ui/shimmer-skeleton';
 import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper';
 import { clsx } from 'clsx';
@@ -452,6 +453,7 @@ const LayerItem: React.FC<{
   const getAssetFromStore = useAssetsStore((state) => state.getAsset);
   const assetsById = useAssetsStore((state) => state.assetsById);
   const settingsByKey = useSettingsStore((state) => state.settingsByKey);
+  const colorVariables = useColorVariablesStore((state) => state.colorVariables);
   const timezone = (settingsByKey.timezone as string | null) ?? 'UTC';
 
   // Create asset resolver that checks pre-resolved assets first (SSR), then falls back to store
@@ -2282,7 +2284,14 @@ const LayerItem: React.FC<{
         );
       }
 
-      const mapHtml = buildMapEmbedHtml(mapSettings, mapToken);
+      const cvList = colorVariables.length > 0
+        ? colorVariables
+        : (serverSettings?.color_variables as import('@/types').ColorVariable[] || []);
+      const resolvedSettings = {
+        ...mapSettings,
+        markerColor: resolveMarkerColor(mapSettings.markerColor, cvList),
+      };
+      const mapHtml = buildMapEmbedHtml(resolvedSettings, mapToken);
 
       return (
         <div

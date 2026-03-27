@@ -1233,14 +1233,16 @@ export default function ColorPicker({
   // Track tab before entering variable edit mode so we can restore it
   const tabBeforeVarEdit = useRef<'solid' | 'linear' | 'radial' | 'image' | null>(null);
   const stopBeforeVarEdit = useRef<string | null>(null);
+  const activeTabRef = useRef(activeTab);
+  const selectedStopIdRef = useRef<string | null>(null);
 
   // Sync picker to variable color when entering edit mode, clear preview on exit
   const prevVarEditId = useRef<string | null>(null);
   useEffect(() => {
     const editKey = varEditState ? (varEditState.id ?? '_create') : null;
     if (editKey && editKey !== prevVarEditId.current && varEditState) {
-      tabBeforeVarEdit.current = activeTab;
-      stopBeforeVarEdit.current = selectedStopId;
+      tabBeforeVarEdit.current = activeTabRef.current;
+      stopBeforeVarEdit.current = selectedStopIdRef.current;
       setActiveTab('solid');
       const colorParts = varEditState.color.split('/');
       const parsed = parseColor(colorParts[0]);
@@ -1275,11 +1277,10 @@ export default function ColorPicker({
   ]);
   const [linearAngle, setLinearAngle] = useState(0);
 
-  // Track open state for each stop's color picker
-  const [openColorPickerId, setOpenColorPickerId] = useState<string | null>(null);
-
   // Track selected stop for gradient editing
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  activeTabRef.current = activeTab;
+  selectedStopIdRef.current = selectedStopId;
 
   // Track dragging state for gradient bar handles
   const [draggingStopId, setDraggingStopId] = useState<string | null>(null);
@@ -1970,7 +1971,7 @@ export default function ColorPicker({
             <div className="size-5 rounded-[6px] shrink-0 -ml-1 relative overflow-hidden outline outline-current/10 -outline-offset-1">
               <div className="absolute inset-0 opacity-15 bg-checkerboard bg-background z-10" />
             </div>
-            <span className="dark:opacity-50">Add...</span>
+            <span className="dark:opacity-50">{placeholder && !placeholder.startsWith('#') ? placeholder : 'Add...'}</span>
           </Button>
       )}
       </PopoverTrigger>

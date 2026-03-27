@@ -7,14 +7,14 @@
  * Controls coordinates, zoom, style, marker visibility, and interactivity.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from '@/components/ui/popover';
+import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+import ColorPicker from './ColorPicker';
 import SettingsPanel from './SettingsPanel';
 
 import { useSettingsStore } from '@/stores/useSettingsStore';
@@ -37,7 +38,7 @@ type SearchResult = { place_name: string; center: [number, number] };
 
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 22;
-const ZOOM_STEP = 0.5;
+const ZOOM_STEP = 0.1;
 
 interface MapSettingsProps {
   layer: Layer | null;
@@ -46,7 +47,10 @@ interface MapSettingsProps {
 
 export default function MapSettings({ layer, onLayerUpdate }: MapSettingsProps) {
   const [isOpen, setIsOpen] = useState(true);
-  const mapSettings = layer?.settings?.map || DEFAULT_MAP_SETTINGS;
+  const mapSettings = useMemo(
+    () => ({ ...DEFAULT_MAP_SETTINGS, ...layer?.settings?.map }),
+    [layer?.settings?.map]
+  );
   const hasToken = !!useSettingsStore((s) => s.getSettingByKey('mapbox_access_token'));
 
   // Local input state for lat/lng/zoom to allow free typing
@@ -87,15 +91,25 @@ export default function MapSettings({ layer, onLayerUpdate }: MapSettingsProps) 
     [layer, mapSettings, onLayerUpdate]
   );
 
+  const debouncedUpdateRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const debouncedUpdateMapSettings = useCallback(
+    (updates: Partial<MapSettingsType>) => {
+      clearTimeout(debouncedUpdateRef.current);
+      debouncedUpdateRef.current = setTimeout(() => updateMapSettings(updates), 300);
+    },
+    [updateMapSettings]
+  );
+  useEffect(() => () => clearTimeout(debouncedUpdateRef.current), []);
+
   const handleLatChange = useCallback(
     (value: string) => {
       setLatInput(value);
       const num = parseFloat(value);
       if (!isNaN(num) && num >= -90 && num <= 90) {
-        updateMapSettings({ latitude: num });
+        debouncedUpdateMapSettings({ latitude: num });
       }
     },
-    [updateMapSettings]
+    [debouncedUpdateMapSettings]
   );
 
   const handleLngChange = useCallback(
@@ -103,10 +117,10 @@ export default function MapSettings({ layer, onLayerUpdate }: MapSettingsProps) 
       setLngInput(value);
       const num = parseFloat(value);
       if (!isNaN(num) && num >= -180 && num <= 180) {
-        updateMapSettings({ longitude: num });
+        debouncedUpdateMapSettings({ longitude: num });
       }
     },
-    [updateMapSettings]
+    [debouncedUpdateMapSettings]
   );
 
   const handleZoomChange = useCallback(
@@ -115,19 +129,19 @@ export default function MapSettings({ layer, onLayerUpdate }: MapSettingsProps) 
       if (!isNaN(num)) {
         const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, num));
         setZoomInput(String(clamped));
-        updateMapSettings({ zoom: clamped });
+        debouncedUpdateMapSettings({ zoom: clamped });
       }
     },
-    [updateMapSettings]
+    [debouncedUpdateMapSettings]
   );
 
   const handleSliderZoomChange = useCallback(
     (values: number[]) => {
       const zoom = values[0];
       setZoomInput(String(zoom));
-      updateMapSettings({ zoom });
+      debouncedUpdateMapSettings({ zoom });
     },
-    [updateMapSettings]
+    [debouncedUpdateMapSettings]
   );
 
   // Geocoding search via API route
@@ -261,7 +275,7 @@ export default function MapSettings({ layer, onLayerUpdate }: MapSettingsProps) 
           <Label variant="muted">Zoom</Label>
           <div className="col-span-2 flex items-center gap-2">
             <Slider
-              value={[mapSettings.zoom]}
+              value={[parseFloat(zoomInput) || mapSettings.zoom]}
               min={ZOOM_MIN}
               max={ZOOM_MAX}
               step={ZOOM_STEP}
@@ -309,26 +323,25 @@ export default function MapSettings({ layer, onLayerUpdate }: MapSettingsProps) 
           </div>
         </div>
 
+        {/* Marker */}
+        <div className="grid grid-cols-3 items-center gap-2">
+          <Label variant="muted">Marker</Label>
+          <div className="col-span-2 [&>div]:w-full [&>button]:w-full">
+            <ColorPicker
+              value={mapSettings.markerColor || ''}
+              onChange={(value) => updateMapSettings({ markerColor: value || null })}
+              onClear={() => updateMapSettings({ markerColor: null })}
+              defaultValue="#2e79d6"
+              placeholder="No marker"
+              solidOnly
+            />
+          </div>
+        </div>
+
         {/* Behavior */}
         <div className="grid grid-cols-3 items-start gap-2">
-          <Label variant="muted" className="pt-0.5">Behavior</Label>
+          <Label variant="muted">Behavior</Label>
           <div className="col-span-2 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="map-marker"
-                checked={mapSettings.showMarker}
-                onCheckedChange={(checked: boolean) =>
-                  updateMapSettings({ showMarker: checked })
-                }
-              />
-              <Label
-                variant="muted"
-                htmlFor="map-marker"
-                className="cursor-pointer"
-              >
-                Show marker
-              </Label>
-            </div>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="map-interactive"

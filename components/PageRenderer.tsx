@@ -14,6 +14,7 @@ import { collectLayerAssetIds, getAssetProxyUrl } from '@/lib/asset-utils';
 import { getAllPages } from '@/lib/repositories/pageRepository';
 import { getAllPageFolders } from '@/lib/repositories/pageFolderRepository';
 import { getMapboxAccessToken } from '@/lib/map-server';
+import { getAllColorVariables } from '@/lib/repositories/colorVariableRepository';
 import { getItemWithValues, getItemsWithValues } from '@/lib/repositories/collectionItemRepository';
 import { getFieldsByCollectionId } from '@/lib/repositories/collectionFieldRepository';
 import { REF_PAGE_PREFIX, REF_COLLECTION_PREFIX } from '@/lib/link-utils';
@@ -279,10 +280,16 @@ export default async function PageRenderer({
   }
 
   // Fetch server-side settings needed by LayerRenderer (e.g. Mapbox token)
-  const mapboxToken = await getMapboxAccessToken();
+  const [mapboxToken, serverColorVariables] = await Promise.all([
+    getMapboxAccessToken(),
+    getAllColorVariables(),
+  ]);
   const serverSettings: Record<string, unknown> = {};
   if (mapboxToken) {
     serverSettings.mapbox_access_token = mapboxToken;
+  }
+  if (serverColorVariables.length > 0) {
+    serverSettings.color_variables = serverColorVariables;
   }
 
   // Pre-resolve all asset URLs for SSR (images, videos, audio, icons, and field values)
