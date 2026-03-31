@@ -13,7 +13,7 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { SplitText } from 'gsap/SplitText';
 
-import { buildGsapProps, addTweenToTimeline, createSplitTextAnimation } from '@/lib/animation-utils';
+import { buildGsapProps, addTweenToTimeline, createSplitTextAnimation, generateInitialAnimationCSS } from '@/lib/animation-utils';
 import { getCurrentBreakpoint } from '@/lib/breakpoint-utils';
 import type { Layer, LayerInteraction, Breakpoint } from '@/types';
 
@@ -24,6 +24,7 @@ if (typeof window !== 'undefined') {
 
 interface AnimationInitializerProps {
   layers: Layer[];
+  injectInitialCSS?: boolean;
 }
 
 interface CollectedInteraction {
@@ -284,11 +285,39 @@ function buildTimeline(interaction: LayerInteraction): gsap.core.Timeline | null
   return timeline;
 }
 
-export default function AnimationInitializer({ layers }: AnimationInitializerProps) {
+export default function AnimationInitializer({ layers, injectInitialCSS }: AnimationInitializerProps) {
   const cleanupRef = useRef<(() => void)[]>([]);
   const timelinesRef = useRef<Map<string, gsap.core.Timeline>>(new Map());
   const prevBreakpointRef = useRef<Breakpoint | null>(null);
   const [currentBreakpoint, setCurrentBreakpoint] = useState<Breakpoint>(() => getCurrentBreakpoint());
+  const styleRef = useRef<HTMLStyleElement | null>(null);
+
+  // Inject initial animation CSS for subtrees not covered by the page-level style tag
+  // (e.g. components embedded in rich text whose layer IDs are namespaced differently)
+  useEffect(() => {
+    if (!injectInitialCSS) return;
+    const { css, hiddenLayerInfo } = generateInitialAnimationCSS(layers);
+    if (css) {
+      const style = document.createElement('style');
+      style.textContent = css;
+      document.head.appendChild(style);
+      styleRef.current = style;
+
+      // Apply data-gsap-hidden to elements that should start hidden
+      hiddenLayerInfo.forEach(({ layerId, breakpoints }) => {
+        const el = getElement(layerId);
+        if (el) {
+          el.setAttribute('data-gsap-hidden', breakpoints || '');
+        }
+      });
+    }
+    return () => {
+      if (styleRef.current) {
+        styleRef.current.remove();
+        styleRef.current = null;
+      }
+    };
+  }, [injectInitialCSS, layers]);
 
   // Listen for breakpoint changes on resize
   useEffect(() => {

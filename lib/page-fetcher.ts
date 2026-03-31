@@ -31,6 +31,7 @@ import { getSettingByKey } from '@/lib/repositories/settingsRepository';
 import { parseMultiAssetFieldValue, buildAssetVirtualValues } from '@/lib/multi-asset-utils';
 import { parseMultiReferenceValue } from '@/lib/collection-utils';
 import { combineBgValues, mergeStaticBgVars } from '@/lib/tailwind-class-mapper';
+import { generateInitialAnimationCSS } from '@/lib/animation-utils';
 import { getMapIframeProps, DEFAULT_MAP_SETTINGS } from '@/lib/map-utils';
 import { getMapboxAccessToken, getGoogleMapsEmbedApiKey } from '@/lib/map-server';
 import { getAssetsByIds } from '@/lib/repositories/assetRepository';
@@ -3899,7 +3900,10 @@ function layerToHtml(
           const withAssets = assetMap
             ? resolved.map(l => resolveLayerAssets(l, assetMap))
             : resolved;
-          return withAssets
+          // Generate initial animation CSS for embedded component layers
+          const { css: rtcAnimCSS } = generateInitialAnimationCSS(withAssets);
+          const rtcStyleTag = rtcAnimCSS ? `<style>${rtcAnimCSS}</style>` : '';
+          return rtcStyleTag + withAssets
             .map(l => layerToHtml(l, effectiveCollectionItemId, pages, folders, collectionItemSlugs, locale, translations, anchorMap, effectiveCollectionItemData, pageCollectionItemData, assetMap, effectiveLayerDataMap, components, childAncestors, layer.name === 'slides'))
             .join('');
         }

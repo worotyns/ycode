@@ -543,7 +543,10 @@ const LayerItem: React.FC<{
               parentComponentLayerId={layer.id}
               ancestorComponentIds={innerAncestorIds}
             />
-            <AnimationInitializer layers={uniqueLayers} />
+            <AnimationInitializer
+              layers={uniqueLayers}
+              injectInitialCSS
+            />
           </>
         )}
       </React.Fragment>
